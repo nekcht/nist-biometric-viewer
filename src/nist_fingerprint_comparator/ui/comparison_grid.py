@@ -42,6 +42,17 @@ class ComparisonGrid(QScrollArea):
         self.session = session
         self._add_disclaimer()
         self._add_file_summaries(session)
+        slot_warnings = {
+            warning for slot in session.comparison_slots for warning in slot.warnings
+        }
+        general_warnings = [
+            warning for warning in session.warnings if warning not in slot_warnings
+        ]
+        if general_warnings:
+            warning = QLabel("\n".join(general_warnings))
+            warning.setObjectName("warning")
+            warning.setWordWrap(True)
+            self._layout.addWidget(warning)
         self._add_section_title("Biometric Impression Comparisons")
 
         for slot in session.comparison_slots:

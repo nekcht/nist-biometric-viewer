@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import re
+from pathlib import Path
 
 from .models import BiometricImage, ComparisonSession, ComparisonSlot
 
@@ -38,6 +39,25 @@ ADDITIONAL_POSITION_DETAILS: dict[str, tuple[str, str]] = {
 }
 
 STANDARD_POSITION_CODES = tuple(str(code) for code in range(1, 11))
+
+
+def files_have_same_content(file_a_path: Path, file_b_path: Path) -> bool:
+    """Return whether two readable files contain exactly the same bytes."""
+    try:
+        if file_a_path.samefile(file_b_path):
+            return True
+        if file_a_path.stat().st_size != file_b_path.stat().st_size:
+            return False
+        with file_a_path.open("rb") as file_a, file_b_path.open("rb") as file_b:
+            while True:
+                file_a_chunk = file_a.read(1024 * 1024)
+                file_b_chunk = file_b.read(1024 * 1024)
+                if file_a_chunk != file_b_chunk:
+                    return False
+                if not file_a_chunk:
+                    return True
+    except OSError:
+        return False
 
 
 def finger_details(position_code: str | int | None) -> tuple[str, str]:

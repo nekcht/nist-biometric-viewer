@@ -20,7 +20,16 @@ class AppSettings:
         return base / HISTORY_DATABASE_FILENAME
 
     def default_export_path(self) -> Path:
+        return self.default_export_directory() / (
+            f"nist_decision_history_{datetime.now().strftime('%Y%m%d_%H%M%S')}.xlsx"
+        )
+
+    def default_session_export_path(self) -> Path:
+        return self.default_export_directory() / (
+            f"nist_session_decisions_{datetime.now().strftime('%Y%m%d_%H%M%S')}.xlsx"
+        )
+
+    @staticmethod
+    def default_export_directory() -> Path:
         desktop = QStandardPaths.writableLocation(QStandardPaths.StandardLocation.DesktopLocation)
-        base = Path(desktop) if desktop else Path.home()
-        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-        return base / f"nist_decision_history_{timestamp}.xlsx"
+        return Path(desktop) if desktop else Path.home()

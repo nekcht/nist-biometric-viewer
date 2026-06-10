@@ -1,4 +1,4 @@
-"""Background parsing and decoding worker."""
+"""Background archive preparation, parsing, and decoding workers."""
 
 from __future__ import annotations
 
@@ -7,10 +7,32 @@ from pathlib import Path
 
 from PySide6.QtCore import QObject, Signal, Slot
 
+from nist_fingerprint_comparator.core.archive import prepare_comparison_archive
 from nist_fingerprint_comparator.imaging.decoder import ImageDecoder
 from nist_fingerprint_comparator.nist.parser import NistParser
 
 LOGGER = logging.getLogger(__name__)
+
+
+class ArchiveWorker(QObject):
+    progress = Signal(str)
+    finished = Signal(object)
+    failed = Signal(str)
+
+    def __init__(self, archive_path: Path, destination: Path, parent=None) -> None:
+        super().__init__(parent)
+        self.archive_path = archive_path
+        self.destination = destination
+
+    @Slot()
+    def run(self) -> None:
+        try:
+            self.progress.emit("Extracting and classifying ANSI/NIST files...")
+            selection = prepare_comparison_archive(self.archive_path, self.destination)
+            self.finished.emit(selection)
+        except Exception as exc:
+            LOGGER.exception("Comparison archive processing failed")
+            self.failed.emit(f"Could not prepare the selected ZIP archive: {exc}")
 
 
 class ParseWorker(QObject):

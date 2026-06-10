@@ -30,6 +30,9 @@ package-dir = {"" = "src"}
 [tool.setuptools.packages.find]
 where = ["src"]
 
+[tool.setuptools.data-files]
+"resources" = ["resources/nist_comparator.png"]
+
 [tool.pytest.ini_options]
 addopts = "-q"
 pythonpath = ["src"]

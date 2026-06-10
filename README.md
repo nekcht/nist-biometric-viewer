@@ -11,12 +11,14 @@ retained where possible instead of causing the entire transaction to fail.
 ## Features
 
 - Professional PySide6 desktop interface with a transaction summary and warning sidebar
-- Single-step setup for File A and the complete File B candidate group
+- Single-step setup using either a comparison ZIP archive or individually selected files
 - Responsive background parsing and decoding with an animated loading screen
 - Same-position File A/File B comparison for every biometric impression
-- One-to-many review queue with explicit green **MATCH** and red **NO MATCH** decisions
+- One-to-many review queue with **MATCH**, **NO MATCH**, and uncertain **PASS** decisions
+- Previous-comparison correction and explicit end-session controls
 - Persistent internal SQLite decision history shared by all future review sessions
-- Filterable XLSX decision-history export and professional menu/icon toolbar
+- In-app history display, permanent history deletion, filterable XLSX export, and
+  professional menu/icon toolbar
 - Cross-file rows for individual fingers, plain impressions, slaps, palms, combined
   captures, duplicates, and unknown position codes
 - Zoomable and pannable in-memory image previews
@@ -40,21 +42,42 @@ python -m pip install -e ".[dev]"
 python -m nist_fingerprint_comparator.app
 ```
 
-Choose **New Comparison** and select the reference File A plus all File B candidates in
-the setup dialog. The visual comparison workspace remains hidden while the reference and
-first candidate load, then opens when the first complete pair is ready. An animated
-loading screen is shown before the first pair and between later candidates. Parsing and
-decoding happen on a worker thread, so the UI remains responsive.
+Choose **New Comparison** and either select the reference File A plus all File B candidates,
+or select one ZIP archive containing the complete group. A comparison archive must be named
+`<File A reference>_files.zip`; its NIST files must use names such as
+`<reference>-fp.nist`, `<reference>_fp.nist`, `<reference>-fi.nist`, or
+`<reference>_fi.nist`. The matching reference is selected as File A and the remaining NIST
+files become File B candidates.
 
-For each candidate, choose **MATCH** or **NO MATCH** after visual review. The choice is
-committed immediately to one internal SQLite history database before the next candidate is
-loaded. `NO MATCH` is stored as `NO_MATCH`. The minimal internal record includes the UTC
-timestamp, decision, filenames, SHA-256 file identifiers, and transaction control numbers.
+The visual comparison workspace remains hidden while the archive, reference, and first
+candidate load, then opens when the first complete pair is ready. An animated loading
+screen is shown before the first pair and between later candidates. Archive extraction,
+parsing, and decoding happen on worker threads, so the UI remains responsive. Extracted
+archive files are held in a temporary session directory and deleted when the review
+finishes, fails before opening, is replaced, or the application closes.
+
+For each candidate, choose **MATCH**, **NO MATCH**, or **PASS** after visual review. Use
+**PASS** to ignore a comparison without saving it to decision history. **MATCH** and
+**NO MATCH** choices are committed immediately to one internal SQLite history database
+before the next candidate is loaded. `NO MATCH` is stored as `NO_MATCH`.
+
+During an active session, **Previous Comparison** warns the reviewer, undoes the immediately
+preceding result, and reloads that pair for a fresh review.
+**End Session** stops the remaining queue while keeping decisions already completed. Use
+**View Decision History** to display all records currently held in the internal database.
+The minimal internal record includes the UTC timestamp, decision, filenames, and
+transaction control numbers.
 After the last decision is recorded, the application clears the completed session and
-returns to the initial New Comparison screen.
+returns to the initial New Comparison screen. Before cleanup, it offers to export only the
+completed session's decisions to an XLSX workbook in the default output folder. After a
+successful export, the system file browser opens that folder. If the target workbook
+already exists, the reviewer can overwrite it, create an automatically numbered
+alternative, or cancel the export.
 
 Use **File > Export Decision History** to export the complete history, or an optional UTC
-date/time range, to a formatted XLSX workbook. The export dialog defaults to the Desktop.
+date/time range, to a formatted XLSX workbook. Use **Delete All Decision History** to
+permanently erase the internal history after confirming the destructive action. The export
+dialog defaults to the Desktop.
 
 The application is for visual review only. It does not perform biometric matching,
 similarity scoring, or identity verification.

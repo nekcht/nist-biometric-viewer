@@ -17,3 +17,7 @@ def test_xlsx_export_defaults_to_desktop(tmp_path: Path) -> None:
 
     assert settings.default_export_path().parent == (Path(desktop) if desktop else Path.home())
     assert settings.default_export_path().suffix == ".xlsx"
+    assert settings.default_session_export_path().parent == (
+        Path(desktop) if desktop else Path.home()
+    )
+    assert settings.default_session_export_path().name.startswith("nist_session_decisions_")

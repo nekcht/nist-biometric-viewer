@@ -56,7 +56,7 @@ QLabel#reviewProgress {
     font-size: 11pt;
     font-weight: 600;
 }
-QPushButton#matchButton, QPushButton#noMatchButton {
+QPushButton#matchButton, QPushButton#noMatchButton, QPushButton#passButton {
     color: #ffffff;
     font-size: 11pt;
     font-weight: 700;
@@ -77,7 +77,16 @@ QPushButton#noMatchButton {
 QPushButton#noMatchButton:hover {
     background: #9e3333;
 }
-QPushButton#matchButton:disabled, QPushButton#noMatchButton:disabled {
+QPushButton#passButton {
+    background: #b17818;
+    border-color: #946313;
+}
+QPushButton#passButton:hover {
+    background: #986714;
+}
+QPushButton#matchButton:disabled,
+QPushButton#noMatchButton:disabled,
+QPushButton#passButton:disabled {
     background: #aeb5bc;
     border-color: #9ca4ad;
     color: #edf0f2;

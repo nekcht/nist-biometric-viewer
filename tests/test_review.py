@@ -1,6 +1,8 @@
+import sqlite3
 from datetime import UTC, datetime
 from pathlib import Path
 
+import pytest
 from openpyxl import load_workbook
 
 from nist_fingerprint_comparator.core.models import NistTransaction
@@ -10,6 +12,7 @@ from nist_fingerprint_comparator.core.review import (
     DecisionXlsxExporter,
     ReviewDecision,
     ReviewQueue,
+    available_export_path,
     decision_record,
 )
 
@@ -53,6 +56,27 @@ def test_review_queue_walks_one_reference_against_many_candidates(tmp_path: Path
     ]
 
 
+def test_review_queue_accepts_pass_decision(tmp_path: Path) -> None:
+    file_a = _transaction(tmp_path / "a.nist", "A-001")
+    file_b = _transaction(tmp_path / "b.nist", "B-001")
+    queue = ReviewQueue()
+    queue.start(file_a, [file_b.source_path])
+
+    queue.record("PASS", file_b)
+
+    assert queue.decisions[0].decision == "PASS"
+
+
+def test_review_queue_keeps_file_a_when_manually_selected_as_candidate(tmp_path: Path) -> None:
+    file_a = _transaction(tmp_path / "a.nist", "A-001")
+    queue = ReviewQueue()
+
+    queue.start(file_a, [file_a.source_path])
+
+    assert queue.current_path == file_a.source_path
+    assert queue.candidate_total == 1
+
+
 def test_internal_history_accumulates_across_future_sessions(tmp_path: Path) -> None:
     database = tmp_path / "history.sqlite3"
     first = DecisionHistoryStore(database)
@@ -79,6 +103,81 @@ def test_internal_history_query_filters_utc_time_range(tmp_path: Path) -> None:
     assert [row["file_a_transaction_control_number"] for row in rows] == ["A-2"]
 
 
+def test_internal_history_can_delete_exact_session_decision(tmp_path: Path) -> None:
+    store = DecisionHistoryStore(tmp_path / "history.sqlite3")
+    first = _decision(tmp_path, "1", "2026-06-10T08:00:00+00:00")
+    second = _decision(tmp_path, "2", "2026-06-10T09:00:00+00:00", "NO_MATCH")
+    store.append(first)
+    store.append(second)
+
+    store.delete(second)
+
+    assert store.count() == 1
+    assert store.query()[0]["file_a_transaction_control_number"] == "A-1"
+    assert second.history_id is None
+
+
+def test_internal_history_can_delete_all_records(tmp_path: Path) -> None:
+    store = DecisionHistoryStore(tmp_path / "history.sqlite3")
+    store.append(_decision(tmp_path, "1", "2026-06-10T08:00:00+00:00"))
+    store.append(_decision(tmp_path, "2", "2026-06-10T09:00:00+00:00", "NO_MATCH"))
+
+    deleted = store.clear()
+
+    assert deleted == 2
+    assert store.count() == 0
+    assert store.query() == []
+
+
+def test_pass_decision_cannot_be_written_to_internal_history(tmp_path: Path) -> None:
+    store = DecisionHistoryStore(tmp_path / "history.sqlite3")
+
+    with pytest.raises(ValueError, match="PASS decisions are ignored"):
+        store.append(_decision(tmp_path, "1", "2026-06-10T08:00:00+00:00", "PASS"))
+
+    assert store.count() == 0
+
+
+def test_existing_history_database_removes_sha_columns_and_pass_rows(tmp_path: Path) -> None:
+    database = tmp_path / "history.sqlite3"
+    with sqlite3.connect(database) as connection:
+        connection.execute(
+            """
+            CREATE TABLE decisions (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                timestamp_utc TEXT NOT NULL,
+                decision TEXT NOT NULL CHECK(decision IN ('MATCH', 'NO_MATCH', 'PASS')),
+                file_a_name TEXT NOT NULL,
+                file_a_sha256 TEXT NOT NULL,
+                file_a_transaction_control_number TEXT NOT NULL,
+                file_b_name TEXT NOT NULL,
+                file_b_sha256 TEXT NOT NULL,
+                file_b_transaction_control_number TEXT NOT NULL
+            )
+            """
+        )
+        connection.execute(
+            "INSERT INTO decisions VALUES "
+            "(1, '2026-06-10T08:00:00+00:00', 'MATCH', 'a.nist', '', 'A', "
+            "'b.nist', '', 'B')"
+        )
+        connection.execute(
+            "INSERT INTO decisions VALUES "
+            "(2, '2026-06-10T09:00:00+00:00', 'PASS', 'a.nist', '', 'A', "
+            "'c.nist', '', 'C')"
+        )
+
+    store = DecisionHistoryStore(database)
+    store.append(_decision(tmp_path, "3", "2026-06-10T10:00:00+00:00", "NO_MATCH"))
+
+    with sqlite3.connect(database) as connection:
+        columns = [row[1] for row in connection.execute("PRAGMA table_info(decisions)")]
+
+    assert columns == ["id", *HISTORY_COLUMNS]
+    assert [row["decision"] for row in store.query()] == ["MATCH", "NO_MATCH"]
+    assert all("sha256" not in column for column in HISTORY_COLUMNS)
+
+
 def test_xlsx_export_contains_minimal_history_columns(tmp_path: Path) -> None:
     decision = _decision(tmp_path, "1", "2026-06-10T12:00:00+00:00", "NO_MATCH")
     output = tmp_path / "history.xlsx"
@@ -90,8 +189,18 @@ def test_xlsx_export_contains_minimal_history_columns(tmp_path: Path) -> None:
     assert len(rows) == 2
     assert len(rows[0]) == len(HISTORY_COLUMNS)
     assert rows[1][1] == "NO_MATCH"
-    assert rows[1][4] == "A-1"
-    assert rows[1][7] == "B-1"
+    assert rows[1][3] == "A-1"
+    assert rows[1][5] == "B-1"
+    assert all("SHA-256" not in str(header) for header in rows[0])
+
+
+def test_available_export_path_uses_first_free_numbered_name(tmp_path: Path) -> None:
+    original = tmp_path / "session.xlsx"
+    second = tmp_path / "session_2.xlsx"
+    original.write_bytes(b"existing")
+    second.write_bytes(b"existing")
+
+    assert available_export_path(original) == tmp_path / "session_3.xlsx"
 
 
 def test_queue_can_restore_candidate_after_persistence_failure(tmp_path: Path) -> None:
@@ -101,7 +210,9 @@ def test_queue_can_restore_candidate_after_persistence_failure(tmp_path: Path) -
     queue.start(file_a, [file_b.source_path])
 
     queue.record("MATCH", file_b)
-    queue.rollback_last()
+    rolled_back = queue.rollback_last()
 
     assert queue.current_path == file_b.source_path
     assert queue.decisions == []
+    assert rolled_back is not None
+    assert rolled_back.decision == "MATCH"

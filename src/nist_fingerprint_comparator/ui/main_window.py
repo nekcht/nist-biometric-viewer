@@ -4,9 +4,10 @@ from __future__ import annotations
 
 import sqlite3
 from pathlib import Path
+from tempfile import TemporaryDirectory
 
-from PySide6.QtCore import QSize, Qt, QThread
-from PySide6.QtGui import QAction
+from PySide6.QtCore import QSize, Qt, QThread, QUrl
+from PySide6.QtGui import QAction, QDesktopServices
 from PySide6.QtWidgets import (
     QFileDialog,
     QGroupBox,
@@ -21,40 +22,36 @@ from PySide6.QtWidgets import (
     QSplitter,
     QStackedWidget,
     QStyle,
+    QToolButton,
     QVBoxLayout,
     QWidget,
 )
 
+from nist_fingerprint_comparator.core.archive import ArchiveComparisonSelection
 from nist_fingerprint_comparator.core.models import NistTransaction
-from nist_fingerprint_comparator.core.pairing import build_cross_file_comparison
+from nist_fingerprint_comparator.core.pairing import (
+    build_cross_file_comparison,
+    files_have_same_content,
+)
 from nist_fingerprint_comparator.core.review import (
     DecisionHistoryStore,
     DecisionXlsxExporter,
+    ReviewDecision,
     ReviewDecisionValue,
     ReviewQueue,
+    available_export_path,
+    decision_record,
 )
 
+from .about_dialog import AboutDialog
 from .comparison_grid import ComparisonGrid
 from .export_dialog import ExportHistoryDialog
+from .history_dialog import DecisionHistoryDialog
 from .metadata_panel import MetadataPanel
+from .resources import application_icon
 from .settings import AppSettings
 from .setup_dialog import ComparisonSetupDialog
-from .worker import ParseWorker
-
-ABOUT_TEXT = (
-    "<b>NIST Fingerprint Comparator</b><br><br>"
-    "A visual-review application for comparing ANSI/NIST biometric transactions. "
-    "It does not perform automated biometric matching or identity verification.<br><br>"
-    "<b>Developed by</b><br>"
-    "Nektarios Christou<br>"
-    "Hellenic Police<br>"
-    "Office of European Interoperability Applications<br>"
-    "European Information Systems Support Department<br>"
-    "Directorate of Information Systems &amp; Digital Governance<br>"
-    "Hellenic Police Headquarters<br><br>"
-    "<b>Email:</b> n.christou@police.gr<br>"
-    "<b>Date:</b> 10/06/2026"
-)
+from .worker import ArchiveWorker, ParseWorker
 
 
 class MainWindow(QMainWindow):
@@ -65,9 +62,10 @@ class MainWindow(QMainWindow):
     ) -> None:
         super().__init__()
         self.setWindowTitle("NIST Fingerprint Comparator")
+        self.setWindowIcon(application_icon())
         self.resize(1440, 900)
         self._thread: QThread | None = None
-        self._worker: ParseWorker | None = None
+        self._worker: ArchiveWorker | ParseWorker | None = None
         self._processing_target: str | None = None
         self._file_a: NistTransaction | None = None
         self._file_b: NistTransaction | None = None
@@ -79,6 +77,8 @@ class MainWindow(QMainWindow):
         )
         self._xlsx_exporter = DecisionXlsxExporter()
         self._pending_candidate_paths: list[Path] = []
+        self._archive_temp_directory: TemporaryDirectory | None = None
+        self._archive_selection_after_thread: ArchiveComparisonSelection | None = None
         self._first_pair_ready = False
         self._start_candidate_after_thread = False
 
@@ -89,41 +89,67 @@ class MainWindow(QMainWindow):
         self.statusBar().showMessage("Ready")
 
     def _create_actions(self) -> None:
-        self.new_comparison_action = QAction("New Comparison...", self)
-        self.new_comparison_action.setIcon(
-            self.style().standardIcon(QStyle.StandardPixmap.SP_DialogOpenButton)
+        self.new_comparison_action = self._create_action(
+            "New Comparison...",
+            QStyle.StandardPixmap.SP_DialogOpenButton,
+            "Select a comparison ZIP or File A and all File B candidates",
+            self.new_comparison,
+            shortcut="Ctrl+N",
         )
-        self.new_comparison_action.setShortcut("Ctrl+N")
-        self.new_comparison_action.setStatusTip(
-            "Select File A and all File B candidates in one setup step"
-        )
-        self.new_comparison_action.triggered.connect(self.new_comparison)
 
-        self.export_history_action = QAction("Export Decision History...", self)
-        self.export_history_action.setIcon(
-            self.style().standardIcon(QStyle.StandardPixmap.SP_DialogSaveButton)
+        self.export_history_action = self._create_action(
+            "Export Decision History...",
+            QStyle.StandardPixmap.SP_DialogSaveButton,
+            "Export all or a UTC time range of internal decision history to XLSX",
+            self._export_history,
         )
-        self.export_history_action.setStatusTip(
-            "Export all or a UTC time range of internal decision history to XLSX"
-        )
-        self.export_history_action.triggered.connect(self._export_history)
 
-        self.reset_zoom_action = QAction("Reset Zoom", self)
-        self.reset_zoom_action.setIcon(
-            self.style().standardIcon(QStyle.StandardPixmap.SP_BrowserReload)
+        self.view_history_action = self._create_action(
+            "View Decision History...",
+            QStyle.StandardPixmap.SP_FileDialogContentsView,
+            "Display all records in the internal decision history",
+            self._show_history,
         )
-        self.reset_zoom_action.setShortcut("Ctrl+0")
-        self.reset_zoom_action.setStatusTip("Fit every biometric image to its viewer")
-        self.reset_zoom_action.triggered.connect(self._reset_zoom)
 
-        self.metadata_action = QAction("Toggle Metadata", self)
-        self.metadata_action.setIcon(
-            self.style().standardIcon(QStyle.StandardPixmap.SP_FileDialogDetailedView)
+        self.clear_history_action = self._create_action(
+            "Delete All Decision History...",
+            QStyle.StandardPixmap.SP_TrashIcon,
+            "Permanently delete every record from internal decision history",
+            self._clear_history,
         )
-        self.metadata_action.setCheckable(True)
-        self.metadata_action.setChecked(True)
-        self.metadata_action.setStatusTip("Show or hide image metadata tables")
-        self.metadata_action.toggled.connect(self._toggle_metadata)
+
+        self.previous_comparison_action = self._create_action(
+            "Previous Comparison",
+            QStyle.StandardPixmap.SP_ArrowBack,
+            "Undo the previous result and review that candidate again",
+            self._go_to_previous_comparison,
+        )
+        self.previous_comparison_action.setEnabled(False)
+
+        self.end_session_action = self._create_action(
+            "End Current Session",
+            QStyle.StandardPixmap.SP_DialogCloseButton,
+            "End the active review session and keep decisions already completed",
+            self._end_current_session,
+        )
+        self.end_session_action.setEnabled(False)
+
+        self.reset_zoom_action = self._create_action(
+            "Reset Zoom",
+            QStyle.StandardPixmap.SP_BrowserReload,
+            "Fit every biometric image to its viewer",
+            self._reset_zoom,
+            shortcut="Ctrl+0",
+        )
+
+        self.metadata_action = self._create_action(
+            "Toggle Metadata",
+            QStyle.StandardPixmap.SP_FileDialogInfoView,
+            "Show or hide image metadata tables",
+            self._toggle_metadata,
+            checkable=True,
+            checked=True,
+        )
 
         self.exit_action = QAction("Exit", self)
         self.exit_action.setShortcut("Ctrl+Q")
@@ -132,28 +158,66 @@ class MainWindow(QMainWindow):
         self.about_action = QAction("About NIST Fingerprint Comparator", self)
         self.about_action.triggered.connect(self._show_about)
 
+    def _create_action(
+        self,
+        text: str,
+        standard_icon: QStyle.StandardPixmap,
+        status_tip: str,
+        callback,
+        *,
+        shortcut: str | None = None,
+        checkable: bool = False,
+        checked: bool = False,
+    ) -> QAction:
+        action = QAction(text, self)
+        action.setIcon(self.style().standardIcon(standard_icon))
+        action.setStatusTip(status_tip)
+        action.setToolTip(status_tip)
+        action.setCheckable(checkable)
+        action.setChecked(checked)
+        if shortcut is not None:
+            action.setShortcut(shortcut)
+        if checkable:
+            action.toggled.connect(callback)
+        else:
+            action.triggered.connect(callback)
+        return action
+
     def _create_toolbar(self) -> None:
         self.main_toolbar = self.addToolBar("Review Tools")
         self.main_toolbar.setObjectName("reviewToolsToolbar")
         self.main_toolbar.setMovable(False)
-        self.main_toolbar.setIconSize(QSize(18, 18))
+        self.main_toolbar.setIconSize(QSize(20, 20))
         self.main_toolbar.setToolButtonStyle(Qt.ToolButtonStyle.ToolButtonIconOnly)
         self.main_toolbar.addAction(self.new_comparison_action)
         self.main_toolbar.addSeparator()
         self.main_toolbar.addAction(self.export_history_action)
+        self.main_toolbar.addAction(self.view_history_action)
+        self.main_toolbar.addAction(self.clear_history_action)
+        self.main_toolbar.addSeparator()
+        self.main_toolbar.addAction(self.previous_comparison_action)
+        self.main_toolbar.addAction(self.end_session_action)
         self.main_toolbar.addSeparator()
         self.main_toolbar.addAction(self.reset_zoom_action)
         self.main_toolbar.addAction(self.metadata_action)
+        for button in self.main_toolbar.findChildren(QToolButton):
+            button.setCursor(Qt.CursorShape.PointingHandCursor)
 
     def _create_menus(self) -> None:
         file_menu = self.menuBar().addMenu("&File")
         file_menu.addAction(self.new_comparison_action)
         file_menu.addSeparator()
         file_menu.addAction(self.export_history_action)
+        file_menu.addAction(self.view_history_action)
+        file_menu.addAction(self.clear_history_action)
+        file_menu.addSeparator()
+        file_menu.addAction(self.end_session_action)
         file_menu.addSeparator()
         file_menu.addAction(self.exit_action)
 
         edit_menu = self.menuBar().addMenu("&Edit")
+        edit_menu.addAction(self.previous_comparison_action)
+        edit_menu.addSeparator()
         edit_menu.addAction(self.reset_zoom_action)
 
         view_menu = self.menuBar().addMenu("&View")
@@ -186,8 +250,9 @@ class MainWindow(QMainWindow):
         title.setObjectName("setupTitle")
         title.setAlignment(Qt.AlignmentFlag.AlignCenter)
         text = QLabel(
-            "Select the reference File A and the complete File B candidate group in one "
-            "setup step. The visual comparison workspace opens when the first pair is ready."
+            "Select a comparison ZIP archive, or select the reference File A and the "
+            "complete File B candidate group individually. The visual comparison workspace "
+            "opens when the first pair is ready."
         )
         text.setObjectName("setupText")
         text.setAlignment(Qt.AlignmentFlag.AlignCenter)
@@ -267,9 +332,22 @@ class MainWindow(QMainWindow):
         self.no_match_button.setObjectName("noMatchButton")
         self.no_match_button.setCursor(Qt.CursorShape.PointingHandCursor)
         self.no_match_button.clicked.connect(lambda: self._record_decision("NO_MATCH"))
+        self.pass_button = QPushButton("PASS")
+        self.pass_button.setObjectName("passButton")
+        self.pass_button.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.pass_button.clicked.connect(lambda: self._record_decision("PASS"))
+        self.previous_button = QPushButton("Previous Comparison")
+        self.previous_button.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.previous_button.clicked.connect(self._go_to_previous_comparison)
+        self.end_session_button = QPushButton("End Session")
+        self.end_session_button.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.end_session_button.clicked.connect(self._end_current_session)
         layout.addWidget(self.review_progress_label, 1)
+        layout.addWidget(self.previous_button)
+        layout.addWidget(self.end_session_button)
         layout.addWidget(self.match_button)
         layout.addWidget(self.no_match_button)
+        layout.addWidget(self.pass_button)
         self._set_decision_buttons_enabled(False)
         return bar
 
@@ -328,13 +406,35 @@ class MainWindow(QMainWindow):
     def new_comparison(self) -> None:
         initial_directory = self._file_a.source_path.parent if self._file_a else Path.home()
         dialog = ComparisonSetupDialog(initial_directory, self)
-        if dialog.exec() and dialog.file_a_path is not None:
+        if not dialog.exec():
+            return
+        if dialog.archive_path is not None:
+            self.start_archive_comparison(dialog.archive_path)
+        elif dialog.file_a_path is not None:
             self.start_comparison(dialog.file_a_path, dialog.candidate_paths)
 
     def start_comparison(self, file_a_path: Path, candidate_paths: list[Path]) -> None:
         """Start processing a complete one-to-many selection."""
         if not candidate_paths:
             return
+        self._reset_to_initial_screen()
+        self._begin_comparison(file_a_path, candidate_paths)
+
+    def start_archive_comparison(self, archive_path: Path) -> None:
+        """Extract and classify a complete one-to-many ZIP selection."""
+        self._reset_to_initial_screen()
+        self._archive_temp_directory = TemporaryDirectory(
+            prefix="nist-fingerprint-comparator-",
+            ignore_cleanup_errors=True,
+        )
+        self.queue_label.setText(f"Preparing comparison archive: {archive_path.name}")
+        self._show_loading(f"Extracting comparison archive: {archive_path.name}")
+        self._start_archive_processing(
+            archive_path,
+            Path(self._archive_temp_directory.name),
+        )
+
+    def _begin_comparison(self, file_a_path: Path, candidate_paths: list[Path]) -> None:
         self._file_a = None
         self._file_b = None
         self._review_queue = ReviewQueue()
@@ -352,6 +452,26 @@ class MainWindow(QMainWindow):
         self.results_label.setText(self._history_summary())
         self._show_loading(f"Loading reference File A: {file_a_path.name}")
         self._start_processing(file_a_path, "a")
+
+    def _start_archive_processing(self, archive_path: Path, destination: Path) -> None:
+        if self._thread is not None and self._thread.isRunning():
+            return
+        self._processing_target = "archive"
+        self.new_comparison_action.setEnabled(False)
+        self._set_decision_buttons_enabled(False)
+
+        self._thread = QThread(self)
+        self._worker = ArchiveWorker(archive_path, destination)
+        self._worker.moveToThread(self._thread)
+        self._thread.started.connect(self._worker.run)
+        self._worker.progress.connect(self._loading_progress_changed)
+        self._worker.finished.connect(self._archive_processing_finished)
+        self._worker.failed.connect(self._processing_failed)
+        self._worker.finished.connect(self._thread.quit)
+        self._worker.failed.connect(self._thread.quit)
+        self._thread.finished.connect(self._worker.deleteLater)
+        self._thread.finished.connect(self._thread_finished)
+        self._thread.start()
 
     def _start_processing(self, path: Path, target: str) -> None:
         if self._thread is not None and self._thread.isRunning():
@@ -375,6 +495,9 @@ class MainWindow(QMainWindow):
         self._thread.finished.connect(self._worker.deleteLater)
         self._thread.finished.connect(self._thread_finished)
         self._thread.start()
+
+    def _archive_processing_finished(self, selection: ArchiveComparisonSelection) -> None:
+        self._archive_selection_after_thread = selection
 
     def _processing_finished(self, transaction: NistTransaction) -> None:
         target = self._processing_target or "a"
@@ -417,6 +540,16 @@ class MainWindow(QMainWindow):
         )
         session.file_a = self._file_a
         session.file_b = self._file_b
+        if (
+            self._file_a is not None
+            and self._file_b is not None
+            and files_have_same_content(self._file_a.source_path, self._file_b.source_path)
+        ):
+            session.warnings.insert(
+                0,
+                "Warning: File A and File B are the same file. Select PASS to ignore this "
+                "comparison; PASS is not saved to decision history.",
+            )
         self.comparison_grid.set_session(session)
         self.comparison_grid.set_metadata_visible(self.metadata_action.isChecked())
         return session
@@ -446,13 +579,20 @@ class MainWindow(QMainWindow):
         warnings.setPlainText("\n".join(transaction.warnings))
 
     def _processing_failed(self, message: str) -> None:
+        target = self._processing_target
         self._set_decision_buttons_enabled(False)
         self.statusBar().showMessage("Processing failed")
-        QMessageBox.critical(self, "Unable to open transaction", message)
-        if self._first_pair_ready:
+        title = (
+            "Unable to prepare comparison archive"
+            if target == "archive"
+            else "Unable to open transaction"
+        )
+        QMessageBox.critical(self, title, message)
+        if self._first_pair_ready and target != "archive":
             self.page_stack.setCurrentWidget(self.workspace_page)
         else:
-            self.page_stack.setCurrentWidget(self.setup_page)
+            self._reset_to_initial_screen()
+            self.statusBar().showMessage("Processing failed")
 
     def _thread_finished(self) -> None:
         self.new_comparison_action.setEnabled(True)
@@ -461,6 +601,14 @@ class MainWindow(QMainWindow):
         self._thread = None
         self._worker = None
         self._processing_target = None
+        archive_selection = self._archive_selection_after_thread
+        self._archive_selection_after_thread = None
+        if archive_selection is not None:
+            self._begin_comparison(
+                archive_selection.file_a_path,
+                archive_selection.candidate_paths,
+            )
+            return
         if self._start_candidate_after_thread:
             self._start_candidate_after_thread = False
             self._start_current_candidate()
@@ -485,7 +633,8 @@ class MainWindow(QMainWindow):
         record = None
         try:
             record = self._review_queue.record(decision, self._file_b)
-            self._history_store.append(record)
+            if decision != "PASS":
+                self._history_store.append(record)
         except (OSError, ValueError, sqlite3.Error) as exc:
             if record is not None:
                 self._review_queue.rollback_last()
@@ -495,12 +644,130 @@ class MainWindow(QMainWindow):
         self._set_decision_buttons_enabled(False)
         self._start_current_candidate()
 
-    def _finish_review(self) -> None:
-        decision_count = len(self._review_queue.decisions)
-        self._reset_to_initial_screen()
-        self.statusBar().showMessage(
-            f"Review complete; {decision_count} decision(s) saved to internal history"
+    def _go_to_previous_comparison(self) -> None:
+        if not self._review_queue.decisions or not self._candidate_ready:
+            return
+        response = QMessageBox.warning(
+            self,
+            "Return to previous comparison?",
+            "The previous comparison result will be undone. That comparison will then "
+            "start again.",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.Cancel,
+            QMessageBox.StandardButton.Cancel,
         )
+        if response != QMessageBox.StandardButton.Yes:
+            return
+        previous_decision = self._review_queue.decisions[-1]
+        try:
+            if previous_decision.history_id is not None:
+                self._history_store.delete(previous_decision)
+        except (OSError, ValueError, sqlite3.Error) as exc:
+            QMessageBox.critical(self, "Could not erase previous decision", str(exc))
+            return
+        self._review_queue.rollback_last()
+        self.results_label.setText(self._history_summary())
+        self._candidate_ready = False
+        self._set_decision_buttons_enabled(False)
+        self._start_current_candidate()
+
+    def _end_current_session(self) -> None:
+        if not self._candidate_ready:
+            return
+        response = QMessageBox.question(
+            self,
+            "End current session?",
+            "Completed decisions will remain in decision history. The current comparison "
+            "and all remaining candidates will not be reviewed.",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.Cancel,
+            QMessageBox.StandardButton.Cancel,
+        )
+        if response != QMessageBox.StandardButton.Yes:
+            return
+        decisions = list(self._review_queue.decisions)
+        decision_count = sum(decision.history_id is not None for decision in decisions)
+        exported_path = self._offer_session_export(decisions)
+        self._reset_to_initial_screen()
+        message = f"Session ended; {decision_count} completed decision(s) kept in internal history"
+        if exported_path is not None:
+            message += f"; session XLSX exported to {exported_path}"
+        self.statusBar().showMessage(message)
+
+    def _finish_review(self) -> None:
+        decisions = list(self._review_queue.decisions)
+        decision_count = sum(decision.history_id is not None for decision in decisions)
+        exported_path = self._offer_session_export(decisions)
+        self._reset_to_initial_screen()
+        message = f"Review complete; {decision_count} decision(s) saved to internal history"
+        if exported_path is not None:
+            message += f"; session XLSX exported to {exported_path}"
+        self.statusBar().showMessage(message)
+
+    def _offer_session_export(self, decisions: list[ReviewDecision]) -> Path | None:
+        decisions = [decision for decision in decisions if decision.history_id is not None]
+        if not decisions:
+            return None
+        output_path = self._settings.default_session_export_path()
+        response = QMessageBox.question(
+            self,
+            "Export completed session?",
+            f"Create an XLSX workbook containing the {len(decisions)} decision(s) from "
+            f"this session in the default output folder?\n\n{output_path.parent}",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+            QMessageBox.StandardButton.Yes,
+        )
+        if response != QMessageBox.StandardButton.Yes:
+            return None
+        if output_path.exists():
+            output_path = self._resolve_existing_session_export(output_path)
+            if output_path is None:
+                return None
+        rows = [decision_record(decision) for decision in decisions]
+        try:
+            self._xlsx_exporter.export(output_path, rows)
+        except (OSError, ValueError) as exc:
+            QMessageBox.critical(self, "Could not export completed session", str(exc))
+            return None
+        self._open_export_folder(output_path.parent)
+        return output_path
+
+    def _resolve_existing_session_export(self, output_path: Path) -> Path | None:
+        message = QMessageBox(self)
+        message.setIcon(QMessageBox.Icon.Warning)
+        message.setWindowTitle("Session export already exists")
+        message.setText(f"An XLSX workbook already exists at:\n\n{output_path}")
+        message.setInformativeText(
+            "Overwrite it, or create a new workbook with an alternative numbered name?"
+        )
+        overwrite_button = message.addButton("Overwrite", QMessageBox.ButtonRole.AcceptRole)
+        alternative_button = message.addButton(
+            "Create New Name",
+            QMessageBox.ButtonRole.ActionRole,
+        )
+        message.addButton(QMessageBox.StandardButton.Cancel)
+        message.exec()
+        if message.clickedButton() is overwrite_button:
+            return output_path
+        if message.clickedButton() is alternative_button:
+            return available_export_path(output_path)
+        return None
+
+    def _open_export_folder(self, folder: Path) -> None:
+        try:
+            opened = QDesktopServices.openUrl(QUrl.fromLocalFile(str(folder)))
+        except Exception as exc:
+            QMessageBox.warning(
+                self,
+                "Could not open export folder",
+                f"The XLSX workbook was created, but the output folder could not be opened: {exc}",
+            )
+            return
+        if not opened:
+            QMessageBox.warning(
+                self,
+                "Could not open export folder",
+                "The XLSX workbook was created, but the system file browser could not open "
+                f"the output folder:\n\n{folder}",
+            )
 
     def _reset_to_initial_screen(self) -> None:
         """Clear the completed session and return to the initial setup screen."""
@@ -509,6 +776,7 @@ class MainWindow(QMainWindow):
         self._file_b = None
         self._review_queue = ReviewQueue()
         self._pending_candidate_paths.clear()
+        self._archive_selection_after_thread = None
         self._first_pair_ready = False
         self._candidate_ready = False
         self._start_candidate_after_thread = False
@@ -523,6 +791,14 @@ class MainWindow(QMainWindow):
         self.reset_zoom_action.setEnabled(False)
         self.metadata_action.setEnabled(False)
         self.page_stack.setCurrentWidget(self.setup_page)
+        self._cleanup_archive_temp()
+
+    def _cleanup_archive_temp(self) -> None:
+        if self._archive_temp_directory is None:
+            return
+        temporary_directory = self._archive_temp_directory
+        self._archive_temp_directory = None
+        temporary_directory.cleanup()
 
     def _update_queue_labels(self) -> None:
         total = self._review_queue.candidate_total
@@ -544,6 +820,12 @@ class MainWindow(QMainWindow):
     def _set_decision_buttons_enabled(self, enabled: bool) -> None:
         self.match_button.setEnabled(enabled)
         self.no_match_button.setEnabled(enabled)
+        self.pass_button.setEnabled(enabled)
+        self.end_session_button.setEnabled(enabled)
+        self.end_session_action.setEnabled(enabled)
+        previous_enabled = enabled and bool(self._review_queue.decisions)
+        self.previous_button.setEnabled(previous_enabled)
+        self.previous_comparison_action.setEnabled(previous_enabled)
 
     @staticmethod
     def _clear_file_sidebar(widgets: dict[str, QWidget]) -> None:
@@ -606,18 +888,52 @@ class MainWindow(QMainWindow):
             return
         self.statusBar().showMessage(f"Decision history exported to {output_path}")
 
+    def _show_history(self) -> None:
+        try:
+            rows = self._history_store.query()
+        except sqlite3.Error as exc:
+            QMessageBox.critical(self, "Could not display decision history", str(exc))
+            return
+        DecisionHistoryDialog(rows, self).exec()
+
+    def _clear_history(self) -> None:
+        record_count = self._history_store.count()
+        if record_count == 0:
+            QMessageBox.information(
+                self,
+                "Decision history is empty",
+                "There are no decision-history records to delete.",
+            )
+            return
+        response = QMessageBox.warning(
+            self,
+            "Delete all decision history?",
+            f"This will permanently delete all {record_count} decision-history record(s). "
+            "This action cannot be undone.",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.Cancel,
+            QMessageBox.StandardButton.Cancel,
+        )
+        if response != QMessageBox.StandardButton.Yes:
+            return
+        try:
+            deleted = self._history_store.clear()
+        except sqlite3.Error as exc:
+            QMessageBox.critical(self, "Could not delete decision history", str(exc))
+            return
+        for decision in self._review_queue.decisions:
+            decision.history_id = None
+        self.results_label.setText(self._history_summary())
+        self.statusBar().showMessage(f"Deleted {deleted} decision-history record(s)")
+
     def _history_summary(self) -> str:
         return f"Internal decision history: {self._history_store.count()} record(s)"
 
     def _show_about(self) -> None:
-        QMessageBox.about(
-            self,
-            "About NIST Fingerprint Comparator",
-            ABOUT_TEXT,
-        )
+        AboutDialog(self).exec()
 
     def closeEvent(self, event) -> None:  # noqa: N802
         if self._thread is not None and self._thread.isRunning():
             self._thread.quit()
-            self._thread.wait(3000)
+            self._thread.wait()
+        self._cleanup_archive_temp()
         super().closeEvent(event)

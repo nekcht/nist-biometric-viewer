@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import hashlib
 import sqlite3
 from contextlib import closing
 from dataclasses import dataclass, field
@@ -16,16 +15,14 @@ from openpyxl.utils import get_column_letter
 
 from .models import NistTransaction
 
-ReviewDecisionValue = Literal["MATCH", "NO_MATCH"]
+ReviewDecisionValue = Literal["MATCH", "NO_MATCH", "PASS"]
 
 HISTORY_COLUMNS = [
     "timestamp_utc",
     "decision",
     "file_a_name",
-    "file_a_sha256",
     "file_a_transaction_control_number",
     "file_b_name",
-    "file_b_sha256",
     "file_b_transaction_control_number",
 ]
 
@@ -33,10 +30,8 @@ EXPORT_HEADERS = {
     "timestamp_utc": "Timestamp UTC",
     "decision": "Decision",
     "file_a_name": "File A Name",
-    "file_a_sha256": "File A SHA-256",
     "file_a_transaction_control_number": "File A Transaction Control Number",
     "file_b_name": "File B Name",
-    "file_b_sha256": "File B SHA-256",
     "file_b_transaction_control_number": "File B Transaction Control Number",
 }
 
@@ -49,6 +44,7 @@ class ReviewDecision:
     file_a: NistTransaction
     file_b: NistTransaction
     timestamp_utc: str = field(default_factory=lambda: datetime.now(UTC).isoformat())
+    history_id: int | None = None
 
 
 @dataclass(slots=True)
@@ -102,28 +98,53 @@ class ReviewQueue:
         self.current_index += 1
         return review_decision
 
-    def rollback_last(self) -> None:
-        if self.decisions:
-            self.decisions.pop()
-            self.current_index -= 1
+    def rollback_last(self) -> ReviewDecision | None:
+        if not self.decisions:
+            return None
+        decision = self.decisions.pop()
+        self.current_index -= 1
+        return decision
 
 
 class DecisionHistoryStore:
-    """Persistent SQLite history with one committed row per user decision."""
+    """Persistent SQLite history for committed MATCH and NO_MATCH decisions."""
 
     def __init__(self, path: Path) -> None:
         self.path = path
         self._initialize()
 
-    def append(self, decision: ReviewDecision) -> None:
+    def append(self, decision: ReviewDecision) -> int:
+        if decision.decision == "PASS":
+            raise ValueError("PASS decisions are ignored and cannot be saved to history.")
         row = decision_record(decision)
         placeholders = ", ".join("?" for _ in HISTORY_COLUMNS)
         columns = ", ".join(HISTORY_COLUMNS)
         with closing(self._connect()) as connection, connection:
-            connection.execute(
+            cursor = connection.execute(
                 f"INSERT INTO decisions ({columns}) VALUES ({placeholders})",
                 [row[column] for column in HISTORY_COLUMNS],
             )
+            history_id = int(cursor.lastrowid)
+        decision.history_id = history_id
+        return history_id
+
+    def delete(self, decision: ReviewDecision) -> None:
+        if decision.history_id is None:
+            raise ValueError("The decision does not have a persisted history record.")
+        with closing(self._connect()) as connection, connection:
+            cursor = connection.execute(
+                "DELETE FROM decisions WHERE id = ?",
+                (decision.history_id,),
+            )
+            if cursor.rowcount != 1:
+                raise ValueError("The persisted decision record could not be found.")
+        decision.history_id = None
+
+    def clear(self) -> int:
+        """Delete every persisted decision and return the number removed."""
+        with closing(self._connect()) as connection, connection:
+            cursor = connection.execute("DELETE FROM decisions")
+            return max(cursor.rowcount, 0)
 
     def query(
         self,
@@ -154,21 +175,36 @@ class DecisionHistoryStore:
     def _initialize(self) -> None:
         self.path.parent.mkdir(parents=True, exist_ok=True)
         with closing(self._connect()) as connection, connection:
-            connection.execute(
-                """
-                CREATE TABLE IF NOT EXISTS decisions (
-                    id INTEGER PRIMARY KEY AUTOINCREMENT,
-                    timestamp_utc TEXT NOT NULL,
-                    decision TEXT NOT NULL CHECK(decision IN ('MATCH', 'NO_MATCH')),
-                    file_a_name TEXT NOT NULL,
-                    file_a_sha256 TEXT NOT NULL,
-                    file_a_transaction_control_number TEXT NOT NULL,
-                    file_b_name TEXT NOT NULL,
-                    file_b_sha256 TEXT NOT NULL,
-                    file_b_transaction_control_number TEXT NOT NULL
-                )
-                """
-            )
+            schema = connection.execute(
+                "SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'decisions'"
+            ).fetchone()
+            if schema is not None and self._history_schema_requires_migration(
+                connection,
+                schema[0],
+            ):
+                self._migrate_history_schema(connection)
+            connection.execute(_CREATE_HISTORY_TABLE_SQL)
+
+    @staticmethod
+    def _history_schema_requires_migration(
+        connection: sqlite3.Connection,
+        schema_sql: str,
+    ) -> bool:
+        columns = [
+            row[1] for row in connection.execute("PRAGMA table_info(decisions)").fetchall()
+        ]
+        return columns != ["id", *HISTORY_COLUMNS] or "'PASS'" in schema_sql
+
+    @staticmethod
+    def _migrate_history_schema(connection: sqlite3.Connection) -> None:
+        connection.execute("ALTER TABLE decisions RENAME TO decisions_before_migration")
+        connection.execute(_CREATE_HISTORY_TABLE_SQL)
+        connection.execute(
+            f"INSERT INTO decisions (id, {', '.join(HISTORY_COLUMNS)}) "
+            f"SELECT id, {', '.join(HISTORY_COLUMNS)} FROM decisions_before_migration "
+            "WHERE decision IN ('MATCH', 'NO_MATCH')"
+        )
+        connection.execute("DROP TABLE decisions_before_migration")
 
     def _connect(self) -> sqlite3.Connection:
         return sqlite3.connect(self.path)
@@ -201,6 +237,18 @@ class DecisionXlsxExporter:
         workbook.save(path)
 
 
+def available_export_path(path: Path) -> Path:
+    """Return the first numbered alternative that does not already exist."""
+    if not path.exists():
+        return path
+    index = 2
+    while True:
+        candidate = path.with_name(f"{path.stem}_{index}{path.suffix}")
+        if not candidate.exists():
+            return candidate
+        index += 1
+
+
 def decision_record(decision: ReviewDecision) -> dict[str, str]:
     row = {
         "timestamp_utc": decision.timestamp_utc,
@@ -214,23 +262,24 @@ def decision_record(decision: ReviewDecision) -> dict[str, str]:
 def _transaction_fields(prefix: str, transaction: NistTransaction) -> dict[str, str]:
     return {
         f"{prefix}_name": transaction.source_path.name,
-        f"{prefix}_sha256": _sha256(transaction.source_path),
         f"{prefix}_transaction_control_number": transaction.transaction_metadata.get("1.009", ""),
     }
-
-
-def _sha256(path: Path) -> str:
-    digest = hashlib.sha256()
-    try:
-        with path.open("rb") as source:
-            for chunk in iter(lambda: source.read(1024 * 1024), b""):
-                digest.update(chunk)
-    except OSError:
-        return ""
-    return digest.hexdigest()
 
 
 def _utc_iso(value: datetime) -> str:
     if value.tzinfo is None:
         value = value.replace(tzinfo=UTC)
     return value.astimezone(UTC).isoformat()
+
+
+_CREATE_HISTORY_TABLE_SQL = """
+CREATE TABLE IF NOT EXISTS decisions (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    timestamp_utc TEXT NOT NULL,
+    decision TEXT NOT NULL CHECK(decision IN ('MATCH', 'NO_MATCH')),
+    file_a_name TEXT NOT NULL,
+    file_a_transaction_control_number TEXT NOT NULL,
+    file_b_name TEXT NOT NULL,
+    file_b_transaction_control_number TEXT NOT NULL
+)
+"""
