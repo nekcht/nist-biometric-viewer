@@ -6,6 +6,7 @@ from .archive import (
     build_archive_comparison_selection,
     prepare_comparison_archive,
 )
+from .loading import LoadingError
 from .models import (
     BiometricImage,
     ComparisonSession,
@@ -33,6 +34,7 @@ __all__ = [
     "build_cross_file_comparison",
     "DecisionHistoryStore",
     "DecisionXlsxExporter",
+    "LoadingError",
     "ReviewDecision",
     "ReviewQueue",
     "available_export_path",

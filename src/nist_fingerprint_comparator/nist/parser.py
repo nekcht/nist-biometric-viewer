@@ -46,8 +46,15 @@ class NistParser:
             try:
                 record = self._parse_record(raw_record, start, end)
             except Exception as exc:  # Defensive boundary for malformed transactions.
-                LOGGER.warning("Record at offset %s could not be parsed: %s", start, exc)
-                transaction.warnings.append(f"Record at offset {start} not parsed: {exc}")
+                exception_type = type(exc).__name__
+                LOGGER.warning(
+                    "Record at offset %s could not be parsed: %s",
+                    start,
+                    exception_type,
+                )
+                transaction.warnings.append(
+                    f"Record at offset {start} not parsed: {exception_type}."
+                )
                 continue
             if split_warning:
                 record.warnings.append(split_warning)

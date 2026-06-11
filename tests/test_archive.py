@@ -2,7 +2,7 @@ import io
 import sys
 from pathlib import Path
 from types import SimpleNamespace
-from zipfile import ZipFile
+from zipfile import BadZipFile, ZipFile
 
 import pytest
 
@@ -77,6 +77,7 @@ def test_rar_archive_extracts_supported_records(tmp_path: Path, monkeypatch) -> 
             return io.BytesIO(data[member.filename])
 
     monkeypatch.setitem(sys.modules, "rarfile", SimpleNamespace(RarFile=FakeRarFile))
+    (tmp_path / "records.rar").write_bytes(b"fake rar")
 
     contents = prepare_comparison_archive(tmp_path / "records.rar", tmp_path / "extracted")
 
@@ -128,21 +129,142 @@ def test_archive_rejects_unsafe_nist_paths(tmp_path: Path) -> None:
     assert not (tmp_path / "reference.nist").exists()
 
 
-@pytest.mark.parametrize(
-    "members",
-    [
-        {"only-one.nist": b"a"},
-        {"notes.txt": b"a", "image.png": b"b"},
-    ],
-)
-def test_archive_requires_at_least_two_supported_records(
-    tmp_path: Path,
-    members: dict[str, bytes],
-) -> None:
-    archive = _archive(tmp_path / "records.zip", members)
+def test_archive_requires_at_least_two_supported_records(tmp_path: Path) -> None:
+    archive = _archive(tmp_path / "records.zip", {"only-one.nist": b"a"})
 
     with pytest.raises(ComparisonArchiveError, match="at least two supported"):
         prepare_comparison_archive(archive, tmp_path / "extracted")
+
+
+def test_empty_archive_has_controlled_error_and_cleans_destination(tmp_path: Path) -> None:
+    archive = _archive(tmp_path / "empty.zip", {})
+    destination = tmp_path / "extracted"
+
+    with pytest.raises(ComparisonArchiveError) as raised:
+        prepare_comparison_archive(archive, destination)
+
+    assert raised.value.title == "Empty archive"
+    assert raised.value.user_message == "No files were found in the archive."
+    assert destination.exists()
+    assert list(destination.iterdir()) == []
+
+
+def test_archive_without_supported_records_has_controlled_error(tmp_path: Path) -> None:
+    archive = _archive(
+        tmp_path / "no-records.zip",
+        {"notes.txt": b"a", "image.png": b"b"},
+    )
+
+    with pytest.raises(ComparisonArchiveError) as raised:
+        prepare_comparison_archive(archive, tmp_path / "extracted")
+
+    assert raised.value.title == "No records found"
+    assert raised.value.user_message == (
+        "The archive does not contain supported NIST records."
+    )
+
+
+def test_corrupt_zip_has_controlled_error(tmp_path: Path) -> None:
+    archive = tmp_path / "corrupt.zip"
+    archive.write_bytes(b"not a zip")
+
+    with pytest.raises(ComparisonArchiveError) as raised:
+        prepare_comparison_archive(archive, tmp_path / "extracted")
+
+    assert raised.value.title == "Archive could not be opened"
+    assert raised.value.original_exception_type == BadZipFile.__name__
+
+
+def test_encrypted_zip_has_controlled_error(tmp_path: Path, monkeypatch) -> None:
+    archive = tmp_path / "encrypted.zip"
+    archive.write_bytes(b"fake zip")
+    member = SimpleNamespace(
+        filename="reference.nist",
+        is_dir=lambda: False,
+        flag_bits=0x1,
+        file_size=1,
+        external_attr=0,
+    )
+
+    class FakeEncryptedZip:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_args) -> None:
+            pass
+
+        def infolist(self):
+            return [member]
+
+    monkeypatch.setattr(
+        "nist_fingerprint_comparator.core.archive.ZipFile",
+        lambda _path: FakeEncryptedZip(),
+    )
+
+    with pytest.raises(ComparisonArchiveError) as raised:
+        prepare_comparison_archive(archive, tmp_path / "extracted")
+
+    assert raised.value.title == "Encrypted archive"
+    assert raised.value.user_message == "Encrypted archives are not supported."
+
+
+def test_unsafe_ignored_archive_member_is_also_blocked(tmp_path: Path) -> None:
+    archive = _archive(
+        tmp_path / "records.zip",
+        {
+            "reference.nist": b"a",
+            "comparison.nist": b"b",
+            "../ignored.txt": b"unsafe",
+        },
+    )
+    destination = tmp_path / "extracted"
+
+    with pytest.raises(ComparisonArchiveError, match="Unsafe path"):
+        prepare_comparison_archive(archive, destination)
+
+    assert destination.exists()
+    assert list(destination.iterdir()) == []
+
+
+def test_missing_rar_backend_has_controlled_error(tmp_path: Path, monkeypatch) -> None:
+    archive = tmp_path / "records.rar"
+    archive.write_bytes(b"fake rar")
+    monkeypatch.setitem(sys.modules, "rarfile", None)
+
+    with pytest.raises(ComparisonArchiveError) as raised:
+        prepare_comparison_archive(archive, tmp_path / "extracted")
+
+    assert raised.value.title == "RAR unavailable"
+    assert raised.value.user_message == "RAR support is not configured on this computer."
+
+
+def test_unavailable_rar_extraction_backend_has_controlled_error(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    archive = tmp_path / "records.rar"
+    archive.write_bytes(b"fake rar")
+
+    class RarCannotExec(Exception):
+        pass
+
+    class FakeRarFile:
+        def __init__(self, _path: Path) -> None:
+            pass
+
+        def __enter__(self):
+            raise RarCannotExec("backend missing")
+
+        def __exit__(self, *_args) -> None:
+            pass
+
+    monkeypatch.setitem(sys.modules, "rarfile", SimpleNamespace(RarFile=FakeRarFile))
+
+    with pytest.raises(ComparisonArchiveError) as raised:
+        prepare_comparison_archive(archive, tmp_path / "extracted")
+
+    assert raised.value.title == "RAR unavailable"
+    assert raised.value.user_message == "RAR support is not configured on this computer."
 
 
 def test_archive_selection_rejects_reference_outside_archive(tmp_path: Path) -> None:

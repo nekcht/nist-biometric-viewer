@@ -21,13 +21,19 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+from nist_fingerprint_comparator.core.loading import (
+    LoadingError,
+    loading_error_from_exception,
+    validate_loading_file,
+)
+
 from .archive_reference_dialog import ReferenceRecordList
 
-NIST_SUFFIXES = {".nist", ".an2", ".eft", ".dat"}
+NIST_SUFFIXES = {".nist", ".an2", ".an", ".eft", ".ebts", ".dat"}
 ARCHIVE_SUFFIXES = {".zip", ".rar"}
 SOURCE_FILE_FILTER = (
-    "Comparison sources (*.nist *.an2 *.eft *.dat *.zip *.rar);;"
-    "ANSI/NIST files (*.nist *.an2 *.eft *.dat);;"
+    "Comparison sources (*.nist *.an2 *.an *.eft *.ebts *.dat *.zip *.rar);;"
+    "ANSI/NIST files (*.nist *.an2 *.an *.eft *.ebts *.dat);;"
     "Archives (*.zip *.rar)"
 )
 
@@ -74,11 +80,8 @@ class ComparisonSetupDialog(QDialog):
     def _build_source_phase(self) -> QWidget:
         page = QWidget()
         layout = QVBoxLayout(page)
-        title = QLabel("1. Select Records")
-        title.setObjectName("sourceTitle")
         introduction = QLabel("Add at least two ANSI/NIST records, or one ZIP/RAR archive.")
         introduction.setWordWrap(True)
-        layout.addWidget(title)
         layout.addWidget(introduction)
 
         self.source_list = _SmartSourceDropList()
@@ -172,26 +175,59 @@ class ComparisonSetupDialog(QDialog):
     def set_source_selection(self, paths: list[Path]) -> None:
         """Identify a dropped or selected source as an archive or ANSI/NIST record group."""
         paths = list(dict.fromkeys(paths))
-        if len(paths) == 1 and paths[0].suffix.casefold() in ARCHIVE_SUFFIXES:
+        is_archive = len(paths) == 1 and paths[0].suffix.casefold() in ARCHIVE_SUFFIXES
+        is_record_group = bool(paths) and all(
+            path.suffix.casefold() in NIST_SUFFIXES for path in paths
+        )
+        if not is_archive and not is_record_group:
+            QMessageBox.information(
+                self,
+                "Unsupported selection",
+                "Select NIST records, a ZIP archive, or a RAR archive.",
+            )
+            return
+        try:
+            for path in paths:
+                validate_loading_file(path, stage="file_selection")
+        except LoadingError as error:
+            self._show_loading_error(error)
+            return
+        if is_archive:
             self.set_archive_selection(paths[0])
             return
-        if paths and all(path.suffix.casefold() in NIST_SUFFIXES for path in paths):
+        if is_record_group:
             existing_paths = self._record_paths if self._archive_path is None else []
             self.set_record_selection([*existing_paths, *paths], self.file_a_path)
             return
-        QMessageBox.information(
-            self,
-            "Unsupported selection",
-            "Select one ZIP/RAR archive or supported ANSI/NIST records.",
+
+    def _show_loading_error(self, error: LoadingError) -> None:
+        dialog = QMessageBox(
+            QMessageBox.Icon.Warning,
+            error.title,
+            error.user_message,
+            parent=self,
         )
+        dialog.setDetailedText(error.technical_details)
+        dialog.exec()
 
     def _choose_sources(self) -> None:
-        selected, _ = QFileDialog.getOpenFileNames(
-            self,
-            "Add ANSI/NIST Files or Archive",
-            str(self._selection_directory()),
-            SOURCE_FILE_FILTER,
-        )
+        try:
+            selected, _ = QFileDialog.getOpenFileNames(
+                self,
+                "Add ANSI/NIST Files or Archive",
+                str(self._selection_directory()),
+                SOURCE_FILE_FILTER,
+            )
+        except Exception as exc:
+            self._show_loading_error(
+                loading_error_from_exception(
+                    exc,
+                    title="Files could not be selected",
+                    user_message="The file selection dialog could not be opened.",
+                    stage="file_selection",
+                )
+            )
+            return
         if selected:
             self.set_source_selection([Path(path) for path in selected])
 
@@ -283,7 +319,7 @@ class _SmartSourceDropList(QListWidget):
         self.setAcceptDrops(True)
 
     def dragEnterEvent(self, event) -> None:  # noqa: N802
-        if valid_source_paths(local_source_paths(event)):
+        if local_source_paths(event):
             event.acceptProposedAction()
         else:
             event.ignore()
@@ -293,7 +329,7 @@ class _SmartSourceDropList(QListWidget):
 
     def dropEvent(self, event) -> None:  # noqa: N802
         paths = local_source_paths(event)
-        if valid_source_paths(paths):
+        if paths:
             self.paths_dropped.emit(paths)
             event.acceptProposedAction()
         else:

@@ -6,6 +6,7 @@ import logging
 from logging.handlers import RotatingFileHandler
 from pathlib import Path
 
+from .core.loading import sanitize_diagnostic
 from .user_data import APP_DATA_DIRECTORY_NAME, get_logs_dir
 
 LOGGER_NAME = "nist_fingerprint_comparator"
@@ -13,6 +14,16 @@ LOG_DIRECTORY_NAME = APP_DATA_DIRECTORY_NAME
 LOG_FILENAME = "nist_fingerprint_comparator.log"
 LOG_MAX_BYTES = 5 * 1024 * 1024
 LOG_BACKUP_COUNT = 5
+
+
+class SanitizingLogFilter(logging.Filter):
+    """Remove raw bytes, control characters, and full paths from log messages."""
+
+    def filter(self, record: logging.LogRecord) -> bool:
+        message = sanitize_diagnostic(record.getMessage(), maximum_length=2000)
+        record.msg = message or ""
+        record.args = ()
+        return True
 
 
 def configure_logging(level: int = logging.INFO, log_path: Path | None = None) -> Path | None:
@@ -27,6 +38,7 @@ def configure_logging(level: int = logging.INFO, log_path: Path | None = None) -
     formatter = logging.Formatter("%(asctime)s %(levelname)s %(name)s: %(message)s")
     console_handler = logging.StreamHandler()
     console_handler.setFormatter(formatter)
+    console_handler.addFilter(SanitizingLogFilter())
     logger.addHandler(console_handler)
 
     target = log_path or default_log_path()
@@ -38,10 +50,14 @@ def configure_logging(level: int = logging.INFO, log_path: Path | None = None) -
             backupCount=LOG_BACKUP_COUNT,
             encoding="utf-8",
         )
-    except OSError:
-        logger.exception("Could not configure application file logging")
+    except OSError as exc:
+        logger.error(
+            "Could not configure application file logging: %s",
+            type(exc).__name__,
+        )
         return None
     file_handler.setFormatter(formatter)
+    file_handler.addFilter(SanitizingLogFilter())
     logger.addHandler(file_handler)
     logger.info("Application logging initialized: %s", target)
     return target

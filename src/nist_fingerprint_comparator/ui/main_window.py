@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 import sqlite3
 from pathlib import Path
 from tempfile import TemporaryDirectory
@@ -34,6 +35,10 @@ from nist_fingerprint_comparator.core.archive import (
     ArchiveContents,
     build_archive_comparison_selection,
 )
+from nist_fingerprint_comparator.core.loading import (
+    LoadingError,
+    loading_error_from_exception,
+)
 from nist_fingerprint_comparator.core.models import NistTransaction
 from nist_fingerprint_comparator.core.pairing import (
     build_cross_file_comparison,
@@ -59,6 +64,8 @@ from .settings import AppSettings
 from .settings_dialog import SettingsDialog
 from .setup_dialog import ComparisonSetupDialog, local_source_paths, valid_source_paths
 from .worker import ArchiveWorker, ParseWorker
+
+LOGGER = logging.getLogger(__name__)
 
 
 class MainWindow(QMainWindow):
@@ -432,35 +439,80 @@ class MainWindow(QMainWindow):
         self._open_comparison_setup()
 
     def _open_comparison_setup(self, initial_paths: list[Path] | None = None) -> None:
-        initial_directory = self._file_a.source_path.parent if self._file_a else Path.home()
-        dialog = ComparisonSetupDialog(initial_directory, self, initial_paths)
-        if not dialog.exec():
-            return
-        if dialog.archive_path is not None:
-            self.start_archive_comparison(dialog.archive_path)
-        elif dialog.file_a_path is not None:
-            self.start_comparison(dialog.file_a_path, dialog.candidate_paths)
+        try:
+            initial_directory = self._file_a.source_path.parent if self._file_a else Path.home()
+            dialog = ComparisonSetupDialog(initial_directory, self, initial_paths)
+            if not dialog.exec():
+                return
+            if dialog.archive_path is not None:
+                self.start_archive_comparison(dialog.archive_path)
+            elif dialog.file_a_path is not None:
+                self.start_comparison(dialog.file_a_path, dialog.candidate_paths)
+        except Exception as exc:
+            self.handle_loading_error(
+                loading_error_from_exception(
+                    exc,
+                    title="Files could not be selected",
+                    user_message="The selected sources could not be prepared.",
+                    stage="file_selection",
+                    source=initial_paths[0] if initial_paths else None,
+                )
+            )
 
     def start_comparison(self, file_a_path: Path, candidate_paths: list[Path]) -> None:
         """Start processing a complete one-to-many selection."""
         if not candidate_paths:
             return
-        self._reset_to_initial_screen()
-        self._begin_comparison(file_a_path, candidate_paths)
+        try:
+            self._reset_to_initial_screen()
+            self._begin_comparison(file_a_path, candidate_paths)
+        except Exception as exc:
+            self.handle_loading_error(
+                loading_error_from_exception(
+                    exc,
+                    title="Records could not be loaded",
+                    user_message="The selected NIST records could not be prepared.",
+                    stage="ui_transition",
+                    source=file_a_path,
+                )
+            )
 
     def start_archive_comparison(self, archive_path: Path) -> None:
         """Extract a complete one-to-many archive selection for user classification."""
         self._reset_to_initial_screen()
-        self._archive_temp_directory = TemporaryDirectory(
-            prefix="nist-biometric-viewer-",
-            ignore_cleanup_errors=True,
-        )
+        try:
+            self._archive_temp_directory = TemporaryDirectory(
+                prefix="nist-biometric-viewer-",
+                ignore_cleanup_errors=True,
+            )
+        except OSError as exc:
+            self.handle_loading_error(
+                loading_error_from_exception(
+                    exc,
+                    title="Temporary folder unavailable",
+                    user_message="A secure temporary folder could not be created.",
+                    stage="temp_directory",
+                    source=archive_path,
+                )
+            )
+            return
         self.review_progress_label.setText(f"Preparing archive: {archive_path.name}")
         self._show_loading(f"Extracting archive: {archive_path.name}")
-        self._start_archive_processing(
-            archive_path,
-            Path(self._archive_temp_directory.name),
-        )
+        try:
+            self._start_archive_processing(
+                archive_path,
+                Path(self._archive_temp_directory.name),
+            )
+        except Exception as exc:
+            self.handle_loading_error(
+                loading_error_from_exception(
+                    exc,
+                    title="Archive could not be opened",
+                    user_message="The selected archive could not be prepared.",
+                    stage="ui_transition",
+                    source=archive_path,
+                )
+            )
 
     def _begin_comparison(self, file_a_path: Path, candidate_paths: list[Path]) -> None:
         self._file_a = None
@@ -493,12 +545,12 @@ class MainWindow(QMainWindow):
         self._worker.moveToThread(self._thread)
         self._thread.started.connect(self._worker.run)
         self._worker.progress.connect(self._loading_progress_changed)
-        self._worker.finished.connect(self._archive_processing_finished)
-        self._worker.failed.connect(self._processing_failed)
+        self._worker.finished.connect(self._archive_processing_finished_safely)
+        self._worker.failed.connect(self.handle_loading_error)
         self._worker.finished.connect(self._thread.quit)
         self._worker.failed.connect(self._thread.quit)
         self._thread.finished.connect(self._worker.deleteLater)
-        self._thread.finished.connect(self._thread_finished)
+        self._thread.finished.connect(self._thread_finished_safely)
         self._thread.start()
 
     def _start_processing(self, path: Path, target: str) -> None:
@@ -519,16 +571,43 @@ class MainWindow(QMainWindow):
         self._worker.moveToThread(self._thread)
         self._thread.started.connect(self._worker.run)
         self._worker.progress.connect(self._loading_progress_changed)
-        self._worker.finished.connect(self._processing_finished)
-        self._worker.failed.connect(self._processing_failed)
+        self._worker.finished.connect(self._processing_finished_safely)
+        self._worker.failed.connect(self.handle_loading_error)
         self._worker.finished.connect(self._thread.quit)
         self._worker.failed.connect(self._thread.quit)
         self._thread.finished.connect(self._worker.deleteLater)
-        self._thread.finished.connect(self._thread_finished)
+        self._thread.finished.connect(self._thread_finished_safely)
         self._thread.start()
 
     def _archive_processing_finished(self, contents: ArchiveContents) -> None:
         self._archive_contents_after_thread = contents
+
+    def _archive_processing_finished_safely(self, contents: ArchiveContents) -> None:
+        try:
+            self._archive_processing_finished(contents)
+        except Exception as exc:
+            self.handle_loading_error(
+                loading_error_from_exception(
+                    exc,
+                    title="Archive could not be opened",
+                    user_message="The extracted records could not be prepared.",
+                    stage="ui_transition",
+                )
+            )
+
+    def _processing_finished_safely(self, transaction: NistTransaction) -> None:
+        try:
+            self._processing_finished(transaction)
+        except Exception as exc:
+            self.handle_loading_error(
+                loading_error_from_exception(
+                    exc,
+                    title="Record could not be loaded",
+                    user_message="The selected record could not be displayed.",
+                    stage="ui_transition",
+                    source=transaction.source_path,
+                )
+            )
 
     def _processing_finished(self, transaction: NistTransaction) -> None:
         target = self._processing_target or "a"
@@ -619,22 +698,50 @@ class MainWindow(QMainWindow):
         metadata.set_rows(rows)
         warnings.setPlainText("\n".join(transaction.warnings))
 
-    def _processing_failed(self, message: str) -> None:
-        target = self._processing_target
+    def handle_loading_error(self, error: LoadingError | str) -> None:
+        """Recover the application from any fatal loading-pipeline failure."""
+        if not isinstance(error, LoadingError):
+            error = LoadingError(
+                "Loading failed",
+                "The selected source could not be loaded.",
+                stage="unknown",
+                technical_message=error,
+            )
+        LOGGER.error("Loading failed: %s", error.technical_details)
+        thread = self._thread
+        if thread is not None and thread.isRunning():
+            thread.requestInterruption()
+            thread.quit()
         self._set_workspace_loading(False)
         self._set_decision_buttons_enabled(False)
-        self.statusBar().showMessage("Processing failed")
-        title = (
-            "Archive unavailable"
-            if target == "archive"
-            else "Record unavailable"
-        )
-        QMessageBox.critical(self, title, message)
-        if self._first_pair_ready and target != "archive":
-            self.page_stack.setCurrentWidget(self.workspace_page)
-        else:
+        self.new_comparison_action.setEnabled(True)
+        try:
             self._reset_to_initial_screen()
-            self.statusBar().showMessage("Processing failed")
+        except Exception as cleanup_error:
+            LOGGER.warning(
+                "Loading recovery cleanup failed: %s",
+                type(cleanup_error).__name__,
+            )
+            self.page_stack.setCurrentWidget(self.setup_page)
+        self.statusBar().showMessage("Loading failed | Ready for a new comparison")
+        dialog = QMessageBox(
+            QMessageBox.Icon.Critical,
+            error.title,
+            error.user_message,
+            parent=self,
+        )
+        dialog.setDetailedText(error.technical_details)
+        try:
+            dialog.exec()
+        except Exception as dialog_error:
+            LOGGER.error(
+                "Loading error dialog failed: %s",
+                type(dialog_error).__name__,
+            )
+
+    def _processing_failed(self, message: str) -> None:
+        """Compatibility entry point for older callers and tests."""
+        self.handle_loading_error(message)
 
     def _thread_finished(self) -> None:
         self.new_comparison_action.setEnabled(True)
@@ -659,6 +766,19 @@ class MainWindow(QMainWindow):
         if self._start_candidate_after_thread:
             self._start_candidate_after_thread = False
             self._start_current_candidate()
+
+    def _thread_finished_safely(self) -> None:
+        try:
+            self._thread_finished()
+        except Exception as exc:
+            self.handle_loading_error(
+                loading_error_from_exception(
+                    exc,
+                    title="Loading failed",
+                    user_message="The selected source could not be prepared.",
+                    stage="ui_transition",
+                )
+            )
 
     def _select_archive_reference(
         self,
@@ -844,7 +964,13 @@ class MainWindow(QMainWindow):
             return
         temporary_directory = self._archive_temp_directory
         self._archive_temp_directory = None
-        temporary_directory.cleanup()
+        try:
+            temporary_directory.cleanup()
+        except Exception as exc:
+            LOGGER.warning(
+                "Temporary archive cleanup failed: %s",
+                type(exc).__name__,
+            )
 
     def _update_review_status(self) -> None:
         total = self._review_queue.candidate_total
@@ -924,8 +1050,19 @@ class MainWindow(QMainWindow):
         self._select_pair(index)
 
     def _select_pair(self, index: int) -> None:
-        self._review_queue.set_current_index(index)
-        self._start_current_candidate()
+        try:
+            self._review_queue.set_current_index(index)
+            self._start_current_candidate()
+        except Exception as exc:
+            self.handle_loading_error(
+                loading_error_from_exception(
+                    exc,
+                    title="Comparison could not be loaded",
+                    user_message="The selected comparison pair could not be loaded.",
+                    stage="comparison_loading",
+                    source=self._review_queue.current_path,
+                )
+            )
 
     @staticmethod
     def _clear_file_sidebar(widgets: dict[str, QWidget]) -> None:
@@ -1073,5 +1210,13 @@ class MainWindow(QMainWindow):
         if self.page_stack.currentWidget() is self.setup_page and valid_source_paths(paths):
             event.acceptProposedAction()
             self._open_comparison_setup(paths)
+            return
+        if self.page_stack.currentWidget() is self.setup_page and paths:
+            event.acceptProposedAction()
+            QMessageBox.information(
+                self,
+                "Unsupported selection",
+                "Select NIST records, a ZIP archive, or a RAR archive.",
+            )
             return
         event.ignore()

@@ -193,6 +193,15 @@ The package follows a `src` layout:
 - `imaging`: decoder selection and in-memory image conversion
 - `ui`: Qt widgets and background worker
 
+### Loading Failure Manual Check
+
+- Open a valid ZIP archive.
+- Open a corrupt ZIP, an empty ZIP, and a ZIP without NIST records.
+- Open a RAR archive on a computer without a configured RAR backend.
+- Drag an unsupported file and cancel the file picker.
+- Load valid records after each failed attempt and verify the app remains usable.
+- Verify failed archive sessions do not leave temporary extraction folders behind.
+
 ## Roadmap
 
 - Full binary Type-4 field and compression support

@@ -26,10 +26,7 @@ def _install_exception_logger() -> None:
         if issubclass(exception_type, KeyboardInterrupt):
             original_hook(exception_type, exception, traceback)
             return
-        LOGGER.critical(
-            "Unhandled application exception",
-            exc_info=(exception_type, exception, traceback),
-        )
+        LOGGER.critical("Unhandled application exception: %s", exception_type.__name__)
         original_hook(exception_type, exception, traceback)
 
     sys.excepthook = log_exception

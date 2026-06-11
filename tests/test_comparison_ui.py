@@ -526,6 +526,8 @@ def test_setup_dialog_appoints_reference_from_one_unified_record_group(tmp_path)
 def test_setup_dialog_adds_individual_record_selections_incrementally(tmp_path) -> None:
     application = QApplication.instance() or QApplication([])
     paths = [tmp_path / name for name in ("one.nist", "two.nist", "three.nist")]
+    for path in paths:
+        path.write_bytes(path.name.encode())
     dialog = ComparisonSetupDialog(tmp_path)
 
     dialog.set_source_selection(paths[:2])
@@ -541,6 +543,8 @@ def test_setup_dialog_accepts_dragged_record_group_and_zip(tmp_path) -> None:
     application = QApplication.instance() or QApplication([])
     records = [tmp_path / "one.nist", tmp_path / "two.dat"]
     archive = tmp_path / "records.zip"
+    for path in [*records, archive]:
+        path.write_bytes(path.name.encode())
     dialog = ComparisonSetupDialog(tmp_path)
 
     record_drop = _drop_event(records)
