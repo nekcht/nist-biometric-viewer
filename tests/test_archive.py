@@ -1,12 +1,15 @@
+import io
+import sys
 from pathlib import Path
+from types import SimpleNamespace
 from zipfile import ZipFile
 
 import pytest
 
 from nist_fingerprint_comparator.core.archive import (
+    ArchiveContents,
     ComparisonArchiveError,
-    archive_reference,
-    nist_reference,
+    build_archive_comparison_selection,
     prepare_comparison_archive,
 )
 
@@ -18,118 +21,132 @@ def _archive(path: Path, members: dict[str, bytes]) -> Path:
     return path
 
 
-def test_archive_extracts_and_classifies_reference_and_candidates(tmp_path: Path) -> None:
+def test_archive_extracts_supported_records_without_filename_conventions(
+    tmp_path: Path,
+) -> None:
     archive = _archive(
-        tmp_path / "A-001_files.zip",
+        tmp_path / "arbitrary-name.zip",
         {
-            "nested/A-001_fp.nist": b"reference",
-            "nested/B-002-fi.nist": b"candidate-1",
-            "B_003_fp.NIST": b"candidate-2",
+            "nested/first-record.nist": b"first",
+            "nested/evidence.an2": b"second",
+            "third.EFT": b"third",
             "notes.txt": b"ignored",
         },
     )
 
-    selection = prepare_comparison_archive(archive, tmp_path / "extracted")
+    contents = prepare_comparison_archive(archive, tmp_path / "extracted")
 
-    assert selection.file_a_reference == "A-001"
-    assert selection.file_a_path.name == "A-001_fp.nist"
-    assert selection.file_a_path.read_bytes() == b"reference"
-    assert {path.name for path in selection.candidate_paths} == {
-        "B-002-fi.nist",
-        "B_003_fp.NIST",
+    assert [path.name for path in contents.nist_paths] == [
+        "evidence.an2",
+        "first-record.nist",
+        "third.EFT",
+    ]
+    assert [path.read_bytes() for path in contents.nist_paths] == [
+        b"second",
+        b"first",
+        b"third",
+    ]
+
+
+def test_rar_archive_extracts_supported_records(tmp_path: Path, monkeypatch) -> None:
+    members = [
+        SimpleNamespace(filename="nested/reference.nist", isdir=lambda: False),
+        SimpleNamespace(filename="comparison.an2", isdir=lambda: False),
+        SimpleNamespace(filename="notes.txt", isdir=lambda: False),
+    ]
+    data = {
+        "nested/reference.nist": b"reference",
+        "comparison.an2": b"comparison",
+        "notes.txt": b"ignored",
     }
-    assert set(selection.candidate_references.values()) == {"B-002", "B_003"}
+
+    class FakeRarFile:
+        def __init__(self, _path: Path) -> None:
+            pass
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_args) -> None:
+            pass
+
+        def infolist(self):
+            return members
+
+        def open(self, member):
+            return io.BytesIO(data[member.filename])
+
+    monkeypatch.setitem(sys.modules, "rarfile", SimpleNamespace(RarFile=FakeRarFile))
+
+    contents = prepare_comparison_archive(tmp_path / "records.rar", tmp_path / "extracted")
+
+    assert [path.name for path in contents.nist_paths] == ["comparison.an2", "reference.nist"]
+    assert [path.read_bytes() for path in contents.nist_paths] == [b"comparison", b"reference"]
 
 
-def test_archive_accepts_underscore_delimiter_for_file_a(tmp_path: Path) -> None:
+def test_selected_archive_reference_uses_every_other_record_for_comparison(
+    tmp_path: Path,
+) -> None:
+    paths = [tmp_path / name for name in ("one.nist", "two.nist", "three.nist")]
+    contents = ArchiveContents(paths)
+
+    selection = build_archive_comparison_selection(contents, paths[1])
+
+    assert selection.file_a_path == paths[1]
+    assert selection.candidate_paths == [paths[0], paths[2]]
+
+
+def test_archive_keeps_record_with_same_contents_as_selected_reference(
+    tmp_path: Path,
+) -> None:
     archive = _archive(
-        tmp_path / "REF123_files.zip",
+        tmp_path / "records.zip",
         {
-            "REF123_fi.nist": b"a",
-            "OTHER-fp.nist": b"b",
+            "reference.nist": b"same transaction",
+            "copy.nist": b"same transaction",
         },
     )
+    contents = prepare_comparison_archive(archive, tmp_path / "extracted")
 
-    selection = prepare_comparison_archive(archive, tmp_path / "extracted")
+    selection = build_archive_comparison_selection(contents, contents.nist_paths[1])
 
-    assert selection.file_a_path.name == "REF123_fi.nist"
-
-
-def test_archive_excludes_candidate_with_same_contents_as_file_a(tmp_path: Path) -> None:
-    archive = _archive(
-        tmp_path / "REF_files.zip",
-        {
-            "REF-fp.nist": b"same transaction",
-            "COPY-fp.nist": b"same transaction",
-            "OTHER-fp.nist": b"different transaction",
-        },
-    )
-
-    selection = prepare_comparison_archive(archive, tmp_path / "extracted")
-
-    assert [path.name for path in selection.candidate_paths] == ["OTHER-fp.nist"]
-
-
-def test_archive_rejects_group_containing_only_a_copy_of_file_a(tmp_path: Path) -> None:
-    archive = _archive(
-        tmp_path / "REF_files.zip",
-        {
-            "REF-fp.nist": b"same transaction",
-            "COPY-fp.nist": b"same transaction",
-        },
-    )
-
-    with pytest.raises(ComparisonArchiveError, match="differs from File A"):
-        prepare_comparison_archive(archive, tmp_path / "extracted")
+    assert selection.candidate_paths == [contents.nist_paths[0]]
 
 
 def test_archive_rejects_unsafe_nist_paths(tmp_path: Path) -> None:
     archive = _archive(
-        tmp_path / "REF_files.zip",
+        tmp_path / "records.zip",
         {
-            "../REF-fp.nist": b"a",
-            "OTHER-fp.nist": b"b",
+            "../reference.nist": b"a",
+            "comparison.nist": b"b",
         },
     )
 
     with pytest.raises(ComparisonArchiveError, match="Unsafe path"):
         prepare_comparison_archive(archive, tmp_path / "extracted")
 
-    assert not (tmp_path / "REF-fp.nist").exists()
+    assert not (tmp_path / "reference.nist").exists()
 
 
 @pytest.mark.parametrize(
-    ("name", "members", "message"),
+    "members",
     [
-        ("wrong.zip", {"REF-fp.nist": b"a", "B-fp.nist": b"b"}, "_files.zip"),
-        ("REF_files.zip", {"B-fp.nist": b"b", "C-fi.nist": b"c"}, "No .nist file"),
-        (
-            "REF_files.zip",
-            {"REF-fp.nist": b"a", "REF_fi.nist": b"a2", "B-fp.nist": b"b"},
-            "More than one",
-        ),
-        ("REF_files.zip", {"REF-fp.nist": b"a"}, "at least one File B"),
-        (
-            "REF_files.zip",
-            {"REF-fp.nist": b"a", "candidate.nist": b"b"},
-            "Every .nist filename",
-        ),
+        {"only-one.nist": b"a"},
+        {"notes.txt": b"a", "image.png": b"b"},
     ],
 )
-def test_archive_reports_invalid_comparison_groups(
+def test_archive_requires_at_least_two_supported_records(
     tmp_path: Path,
-    name: str,
     members: dict[str, bytes],
-    message: str,
 ) -> None:
-    archive = _archive(tmp_path / name, members)
+    archive = _archive(tmp_path / "records.zip", members)
 
-    with pytest.raises(ComparisonArchiveError, match=message):
-        prepare_comparison_archive(archive, tmp_path / f"extracted-{len(members)}")
+    with pytest.raises(ComparisonArchiveError, match="at least two supported"):
+        prepare_comparison_archive(archive, tmp_path / "extracted")
 
 
-def test_reference_helpers_follow_archive_naming_rules() -> None:
-    assert archive_reference(Path("CASE_42_files.zip")) == "CASE_42"
-    assert nist_reference(Path("CASE_42-fi.nist")) == "CASE_42"
-    assert nist_reference(Path("CASE_42_fp.nist")) == "CASE_42"
-    assert nist_reference(Path("CASE_42.nist")) is None
+def test_archive_selection_rejects_reference_outside_archive(tmp_path: Path) -> None:
+    contents = ArchiveContents([tmp_path / "one.nist", tmp_path / "two.nist"])
+
+    with pytest.raises(ComparisonArchiveError, match="not part of the extracted archive"):
+        build_archive_comparison_selection(contents, tmp_path / "other.nist")

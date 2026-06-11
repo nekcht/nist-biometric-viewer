@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+import re
 from pathlib import Path
 
 from nist_fingerprint_comparator.core.errors import NistParseError
@@ -14,6 +15,12 @@ from .records import biometric_from_binary_type4, biometric_from_tagged
 from .separators import FS, GS_BYTES
 
 LOGGER = logging.getLogger(__name__)
+TYPE_2_REFERENCE_NUMBER_FIELD = "2.012"
+MN1_RE = re.compile(
+    rb"(?<![A-Za-z0-9])MN1\s*(?:[:=]|\x1e|\x1f)\s*"
+    rb"(?P<value>[^\x1c\x1d\x1e\x1f]+)",
+    re.IGNORECASE,
+)
 
 
 class NistParser:
@@ -165,6 +172,9 @@ class NistParser:
             transaction.transaction_metadata.update(_string_fields(record.fields))
         elif record_type == 2:
             transaction.descriptive_metadata.update(_string_fields(record.fields))
+            reference_number = _type_2_reference_number(record.fields, raw_record)
+            if reference_number:
+                transaction.descriptive_metadata["MN1"] = reference_number
         elif record_type in SUPPORTED_TAGGED_IMAGE_RECORDS:
             transaction.biometric_images.append(biometric_from_tagged(record))
         elif record_type == 4:
@@ -183,6 +193,19 @@ class NistParser:
 
 def _string_fields(fields: dict[str, object]) -> dict[str, str]:
     return {key: str(value) for key, value in fields.items() if not isinstance(value, bytes)}
+
+
+def _type_2_reference_number(
+    fields: dict[str, object],
+    raw_record: bytes,
+) -> str | None:
+    reference_number = scalar_text(fields, TYPE_2_REFERENCE_NUMBER_FIELD)
+    if reference_number:
+        return reference_number
+    match = MN1_RE.search(raw_record)
+    if match is None:
+        return None
+    return decode_text(match.group("value")) or None
 
 
 def _safe_int(value: str | None) -> int | None:

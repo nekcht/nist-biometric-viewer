@@ -30,6 +30,9 @@ class FingerprintCard(QFrame):
 
         self.viewer = ImageViewer()
         layout.addWidget(self.viewer, 1)
+        self.zoom_out_button = self.viewer.zoom_out_button
+        self.fit_button = self.viewer.fit_button
+        self.zoom_in_button = self.viewer.zoom_in_button
 
         self.placeholder = QLabel()
         self.placeholder.setObjectName("placeholder")

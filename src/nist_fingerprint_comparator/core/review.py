@@ -16,23 +16,34 @@ from openpyxl.utils import get_column_letter
 from .models import NistTransaction
 
 ReviewDecisionValue = Literal["MATCH", "NO_MATCH", "PASS"]
+HISTORY_ID_KEY = "history_id"
 
 HISTORY_COLUMNS = [
     "timestamp_utc",
+    "timestamp",
+    "timezone",
     "decision",
     "file_a_name",
+    "file_a_reference_number",
     "file_a_transaction_control_number",
     "file_b_name",
+    "file_b_reference_number",
     "file_b_transaction_control_number",
 ]
 
+DISPLAY_HISTORY_COLUMNS = [column for column in HISTORY_COLUMNS if column != "timestamp_utc"]
+
 EXPORT_HEADERS = {
-    "timestamp_utc": "Timestamp UTC",
+    "timestamp_utc": "Timestamp UTC (Internal)",
+    "timestamp": "Timestamp",
+    "timezone": "Time Zone",
     "decision": "Decision",
-    "file_a_name": "File A Name",
-    "file_a_transaction_control_number": "File A Transaction Control Number",
-    "file_b_name": "File B Name",
-    "file_b_transaction_control_number": "File B Transaction Control Number",
+    "file_a_name": "Reference Record Name",
+    "file_a_reference_number": "Reference Record Reference Number (MN1)",
+    "file_a_transaction_control_number": "Reference Record Transaction Control Number",
+    "file_b_name": "Comparison Record Name",
+    "file_b_reference_number": "Comparison Record Reference Number (MN1)",
+    "file_b_transaction_control_number": "Comparison Record Transaction Control Number",
 }
 
 
@@ -44,6 +55,8 @@ class ReviewDecision:
     file_a: NistTransaction
     file_b: NistTransaction
     timestamp_utc: str = field(default_factory=lambda: datetime.now(UTC).isoformat())
+    timestamp: str = field(default_factory=lambda: datetime.now(UTC).isoformat())
+    timezone: str = "UTC"
     history_id: int | None = None
 
 
@@ -86,7 +99,7 @@ class ReviewQueue:
         file_b: NistTransaction,
     ) -> ReviewDecision:
         if self.file_a is None or self.current_path is None:
-            raise ValueError("No active comparison candidate is available.")
+            raise ValueError("No active Comparison Record is available.")
         review_decision = ReviewDecision(
             decision=decision,
             candidate_number=self.current_index + 1,
@@ -131,14 +144,14 @@ class DecisionHistoryStore:
     def delete(self, decision: ReviewDecision) -> None:
         if decision.history_id is None:
             raise ValueError("The decision does not have a persisted history record.")
+        self.delete_by_id(decision.history_id)
+        decision.history_id = None
+
+    def delete_by_id(self, history_id: int) -> None:
         with closing(self._connect()) as connection, connection:
-            cursor = connection.execute(
-                "DELETE FROM decisions WHERE id = ?",
-                (decision.history_id,),
-            )
+            cursor = connection.execute("DELETE FROM decisions WHERE id = ?", (history_id,))
             if cursor.rowcount != 1:
                 raise ValueError("The persisted decision record could not be found.")
-        decision.history_id = None
 
     def clear(self) -> int:
         """Delete every persisted decision and return the number removed."""
@@ -162,11 +175,17 @@ class DecisionHistoryStore:
         where = f" WHERE {' AND '.join(clauses)}" if clauses else ""
         with closing(self._connect()) as connection:
             rows = connection.execute(
-                f"SELECT {', '.join(HISTORY_COLUMNS)} FROM decisions"
+                f"SELECT id, {', '.join(HISTORY_COLUMNS)} FROM decisions"
                 f"{where} ORDER BY timestamp_utc, id",
                 parameters,
             ).fetchall()
-        return [dict(zip(HISTORY_COLUMNS, row, strict=True)) for row in rows]
+        return [
+            {
+                HISTORY_ID_KEY: str(row[0]),
+                **dict(zip(HISTORY_COLUMNS, row[1:], strict=True)),
+            }
+            for row in rows
+        ]
 
     def count(self) -> int:
         with closing(self._connect()) as connection:
@@ -197,11 +216,28 @@ class DecisionHistoryStore:
 
     @staticmethod
     def _migrate_history_schema(connection: sqlite3.Connection) -> None:
+        existing_columns = {
+            row[1] for row in connection.execute("PRAGMA table_info(decisions)").fetchall()
+        }
         connection.execute("ALTER TABLE decisions RENAME TO decisions_before_migration")
         connection.execute(_CREATE_HISTORY_TABLE_SQL)
+        selections = []
+        for column in HISTORY_COLUMNS:
+            if column in existing_columns:
+                selections.append(column)
+            elif column == "timestamp":
+                selections.append("timestamp_utc")
+            elif column == "timezone":
+                selections.append("'UTC'")
+            elif column.endswith("_reference_number"):
+                selections.append("''")
+            else:
+                raise sqlite3.DatabaseError(
+                    f"History database is missing required column: {column}"
+                )
         connection.execute(
             f"INSERT INTO decisions (id, {', '.join(HISTORY_COLUMNS)}) "
-            f"SELECT id, {', '.join(HISTORY_COLUMNS)} FROM decisions_before_migration "
+            f"SELECT id, {', '.join(selections)} FROM decisions_before_migration "
             "WHERE decision IN ('MATCH', 'NO_MATCH')"
         )
         connection.execute("DROP TABLE decisions_before_migration")
@@ -217,10 +253,10 @@ class DecisionXlsxExporter:
         path.parent.mkdir(parents=True, exist_ok=True)
         workbook = Workbook()
         sheet = workbook.active
-        sheet.title = "Decision History"
-        sheet.append([EXPORT_HEADERS[column] for column in HISTORY_COLUMNS])
+        sheet.title = "Comparison History"
+        sheet.append([EXPORT_HEADERS[column] for column in DISPLAY_HISTORY_COLUMNS])
         for row in rows:
-            sheet.append([row[column] for column in HISTORY_COLUMNS])
+            sheet.append([row[column] for column in DISPLAY_HISTORY_COLUMNS])
 
         header_fill = PatternFill("solid", fgColor="D9E3EC")
         for cell in sheet[1]:
@@ -228,7 +264,7 @@ class DecisionXlsxExporter:
             cell.fill = header_fill
         sheet.freeze_panes = "A2"
         sheet.auto_filter.ref = sheet.dimensions
-        for index, column in enumerate(HISTORY_COLUMNS, start=1):
+        for index, column in enumerate(DISPLAY_HISTORY_COLUMNS, start=1):
             values = [EXPORT_HEADERS[column], *(str(row[column]) for row in rows)]
             sheet.column_dimensions[get_column_letter(index)].width = min(
                 max(len(value) for value in values) + 2,
@@ -252,6 +288,8 @@ def available_export_path(path: Path) -> Path:
 def decision_record(decision: ReviewDecision) -> dict[str, str]:
     row = {
         "timestamp_utc": decision.timestamp_utc,
+        "timestamp": decision.timestamp,
+        "timezone": decision.timezone,
         "decision": decision.decision,
     }
     row.update(_transaction_fields("file_a", decision.file_a))
@@ -262,6 +300,7 @@ def decision_record(decision: ReviewDecision) -> dict[str, str]:
 def _transaction_fields(prefix: str, transaction: NistTransaction) -> dict[str, str]:
     return {
         f"{prefix}_name": transaction.source_path.name,
+        f"{prefix}_reference_number": transaction.reference_number,
         f"{prefix}_transaction_control_number": transaction.transaction_metadata.get("1.009", ""),
     }
 
@@ -276,10 +315,14 @@ _CREATE_HISTORY_TABLE_SQL = """
 CREATE TABLE IF NOT EXISTS decisions (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     timestamp_utc TEXT NOT NULL,
+    timestamp TEXT NOT NULL,
+    timezone TEXT NOT NULL,
     decision TEXT NOT NULL CHECK(decision IN ('MATCH', 'NO_MATCH')),
     file_a_name TEXT NOT NULL,
+    file_a_reference_number TEXT NOT NULL,
     file_a_transaction_control_number TEXT NOT NULL,
     file_b_name TEXT NOT NULL,
+    file_b_reference_number TEXT NOT NULL,
     file_b_transaction_control_number TEXT NOT NULL
 )
 """

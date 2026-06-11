@@ -20,10 +20,10 @@ from PySide6.QtWidgets import (
 class ExportHistoryDialog(QDialog):
     def __init__(self, parent=None) -> None:
         super().__init__(parent)
-        self.setWindowTitle("Export Decision History")
+        self.setWindowTitle("Export Comparison History")
         layout = QVBoxLayout(self)
         introduction = QLabel(
-            "Export the complete decision history, or restrict the XLSX export to a UTC "
+            "Export the complete comparison history, or restrict the XLSX export to a UTC "
             "date/time range."
         )
         introduction.setWordWrap(True)

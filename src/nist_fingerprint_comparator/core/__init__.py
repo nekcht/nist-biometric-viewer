@@ -1,6 +1,11 @@
 """Core domain models and operations."""
 
-from .archive import ArchiveComparisonSelection, prepare_comparison_archive
+from .archive import (
+    ArchiveComparisonSelection,
+    ArchiveContents,
+    build_archive_comparison_selection,
+    prepare_comparison_archive,
+)
 from .models import (
     BiometricImage,
     ComparisonSession,
@@ -19,6 +24,7 @@ from .review import (
 
 __all__ = [
     "ArchiveComparisonSelection",
+    "ArchiveContents",
     "BiometricImage",
     "ComparisonSession",
     "ComparisonSlot",
@@ -30,5 +36,6 @@ __all__ = [
     "ReviewDecision",
     "ReviewQueue",
     "available_export_path",
+    "build_archive_comparison_selection",
     "prepare_comparison_archive",
 ]

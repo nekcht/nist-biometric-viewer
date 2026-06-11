@@ -2,17 +2,12 @@
 
 from __future__ import annotations
 
-from PySide6.QtWidgets import QHBoxLayout, QLabel, QScrollArea, QVBoxLayout, QWidget
+from PySide6.QtCore import QTimer
+from PySide6.QtWidgets import QFrame, QHBoxLayout, QLabel, QScrollArea, QVBoxLayout, QWidget
 
 from nist_fingerprint_comparator.core.models import ComparisonSession
 
 from .fingerprint_card import FingerprintCard
-
-DISCLAIMER = (
-    "Visual comparison only. This application displays biometric images and metadata for "
-    "human review. It does not perform biometric matching, similarity scoring, or identity "
-    "verification."
-)
 
 
 class ComparisonGrid(QScrollArea):
@@ -31,8 +26,9 @@ class ComparisonGrid(QScrollArea):
     def show_empty(self) -> None:
         self._clear()
         self.session = None
-        self._add_disclaimer()
-        message = QLabel("Open File A and File B to begin visual fingerprint comparison.")
+        message = QLabel(
+            "Open a Reference Record and Comparison Record to begin visual comparison."
+        )
         message.setObjectName("placeholder")
         self._layout.addWidget(message)
         self._layout.addStretch(1)
@@ -40,8 +36,7 @@ class ComparisonGrid(QScrollArea):
     def set_session(self, session: ComparisonSession) -> None:
         self._clear()
         self.session = session
-        self._add_disclaimer()
-        self._add_file_summaries(session)
+        self._add_record_headers(session)
         slot_warnings = {
             warning for slot in session.comparison_slots for warning in slot.warnings
         }
@@ -53,13 +48,7 @@ class ComparisonGrid(QScrollArea):
             warning.setObjectName("warning")
             warning.setWordWrap(True)
             self._layout.addWidget(warning)
-        self._add_section_title("Biometric Impression Comparisons")
-
         for slot in session.comparison_slots:
-            code = slot.position_code or "No position code"
-            label = QLabel(f"{code}. {slot.finger_name}")
-            label.setObjectName("pairTitle")
-            self._layout.addWidget(label)
             if slot.warnings:
                 warning = QLabel("\n".join(slot.warnings))
                 warning.setObjectName("warning")
@@ -69,13 +58,20 @@ class ComparisonGrid(QScrollArea):
             row_layout = QHBoxLayout(row)
             row_layout.setContentsMargins(0, 0, 0, 0)
             row_layout.setSpacing(12)
-            file_a = FingerprintCard(f"File A - {slot.finger_name}", slot.file_a_image)
-            file_b = FingerprintCard(f"File B - {slot.finger_name}", slot.file_b_image)
+            file_a = FingerprintCard(
+                slot.finger_name,
+                slot.file_a_image,
+            )
+            file_b = FingerprintCard(
+                slot.finger_name,
+                slot.file_b_image,
+            )
             row_layout.addWidget(file_a, 1)
             row_layout.addWidget(file_b, 1)
             self._layout.addWidget(row)
             self._cards.extend([file_a, file_b])
         self._layout.addStretch(1)
+        self.scroll_to_top()
 
     def reset_zoom(self) -> None:
         for card in self._cards:
@@ -85,6 +81,10 @@ class ComparisonGrid(QScrollArea):
         for card in self._cards:
             card.set_metadata_visible(visible)
 
+    def scroll_to_top(self) -> None:
+        self.verticalScrollBar().setValue(0)
+        QTimer.singleShot(0, lambda: self.verticalScrollBar().setValue(0))
+
     def _clear(self) -> None:
         self._cards.clear()
         while self._layout.count():
@@ -93,38 +93,47 @@ class ComparisonGrid(QScrollArea):
             if widget is not None:
                 widget.deleteLater()
 
-    def _add_disclaimer(self) -> None:
-        disclaimer = QLabel(DISCLAIMER)
-        disclaimer.setObjectName("disclaimer")
-        disclaimer.setWordWrap(True)
-        self._layout.addWidget(disclaimer)
-
-    def _add_file_summaries(self, session: ComparisonSession) -> None:
+    def _add_record_headers(self, session: ComparisonSession) -> None:
         summaries = QWidget()
         layout = QHBoxLayout(summaries)
         layout.setContentsMargins(0, 0, 0, 0)
         layout.setSpacing(12)
-        layout.addWidget(self._summary_label("File A", session.file_a), 1)
-        layout.addWidget(self._summary_label("File B", session.file_b), 1)
+        layout.addWidget(self._record_header("Reference Record", session.file_a), 1)
+        layout.addWidget(self._record_header("Comparison Record", session.file_b), 1)
         self._layout.addWidget(summaries)
 
     @staticmethod
-    def _summary_label(source: str, transaction) -> QLabel:
+    def _record_header(source: str, transaction) -> QFrame:
+        header = QFrame()
+        header.setObjectName("recordHeader")
+        layout = QVBoxLayout(header)
+        layout.setContentsMargins(12, 10, 12, 10)
+        layout.setSpacing(3)
+        title = QLabel(source)
+        title.setObjectName("recordHeaderTitle")
+        layout.addWidget(title)
         if transaction is None:
-            text = f"{source}\nNot loaded"
+            filename = "Not loaded"
+            reference_number = "Not available"
+            summary = "Records: 0 | Biometric images: 0 | Warnings: 0"
         else:
-            text = (
-                f"{source}: {transaction.source_path.name}\n"
+            filename = transaction.source_path.name
+            reference_number = transaction.reference_number or "Not available"
+            summary = (
                 f"Records: {len(transaction.records)} | "
                 f"Biometric images: {len(transaction.biometric_images)} | "
                 f"Warnings: {len(transaction.warnings)}"
             )
-        label = QLabel(text)
-        label.setObjectName("fileSummary")
-        label.setWordWrap(True)
-        return label
-
-    def _add_section_title(self, title: str) -> None:
-        label = QLabel(title)
-        label.setObjectName("sectionTitle")
-        self._layout.addWidget(label)
+        filename_label = QLabel(filename)
+        filename_label.setObjectName("recordHeaderFilename")
+        filename_label.setWordWrap(True)
+        reference_number_label = QLabel(f"Reference number: {reference_number}")
+        reference_number_label.setObjectName("recordHeaderReferenceNumber")
+        reference_number_label.setWordWrap(True)
+        summary_label = QLabel(summary)
+        summary_label.setObjectName("recordHeaderStats")
+        summary_label.setWordWrap(True)
+        layout.addWidget(filename_label)
+        layout.addWidget(reference_number_label)
+        layout.addWidget(summary_label)
+        return header

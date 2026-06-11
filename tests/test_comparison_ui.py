@@ -5,24 +5,38 @@ from pathlib import Path
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
-import pytest
-from PySide6.QtCore import QSettings, Qt, QTimeZone
-from PySide6.QtGui import QDesktopServices
-from PySide6.QtWidgets import QApplication, QMessageBox, QToolButton
+from PySide6.QtCore import QMimeData, QSettings, Qt, QTimeZone, QUrl
+from PySide6.QtGui import QPixmap
+from PySide6.QtWidgets import (
+    QApplication,
+    QFileDialog,
+    QGroupBox,
+    QLabel,
+    QMessageBox,
+    QPushButton,
+    QToolBar,
+)
 
 from nist_fingerprint_comparator.core.models import BiometricImage
 from nist_fingerprint_comparator.core.models import NistTransaction
-from nist_fingerprint_comparator.core.archive import ArchiveComparisonSelection
+from nist_fingerprint_comparator.core.archive import ArchiveComparisonSelection, ArchiveContents
 from nist_fingerprint_comparator.core.pairing import build_cross_file_comparison, finger_details
 from nist_fingerprint_comparator.core.review import DecisionHistoryStore
 from nist_fingerprint_comparator.ui.about_dialog import ABOUT_TEXT, AboutDialog
-from nist_fingerprint_comparator.ui.comparison_grid import ComparisonGrid, DISCLAIMER
+from nist_fingerprint_comparator.ui.archive_reference_dialog import (
+    ArchiveReferenceDialog,
+    ReferenceRecordList,
+)
+from nist_fingerprint_comparator.ui.comparison_grid import ComparisonGrid
 from nist_fingerprint_comparator.ui.export_dialog import ExportHistoryDialog
 from nist_fingerprint_comparator.ui.history_dialog import DecisionHistoryDialog
+from nist_fingerprint_comparator.ui.image_viewer import ImageViewer
 from nist_fingerprint_comparator.ui.main_window import MainWindow
 from nist_fingerprint_comparator.ui.resources import application_icon_path
 from nist_fingerprint_comparator.ui.settings import AppSettings
+from nist_fingerprint_comparator.ui.settings_dialog import SettingsDialog
 from nist_fingerprint_comparator.ui.setup_dialog import ComparisonSetupDialog
+from nist_fingerprint_comparator.ui.styles import APP_STYLESHEET
 
 
 def _window(tmp_path: Path) -> MainWindow:
@@ -50,6 +64,14 @@ def test_ui_renders_every_impression_as_a_cross_file_row() -> None:
         [_image("1"), _image("13"), _image("21")],
         [_image("1"), _image("13"), _image("23")],
     )
+    session.file_a = NistTransaction(
+        source_path=Path("reference.nist"),
+        descriptive_metadata={"MN1": "REFERENCE-123"},
+    )
+    session.file_b = NistTransaction(
+        source_path=Path("comparison.nist"),
+        descriptive_metadata={"MN1": "COMPARISON-456"},
+    )
     grid = ComparisonGrid()
 
     grid.set_session(session)
@@ -64,7 +86,24 @@ def test_ui_renders_every_impression_as_a_cross_file_row() -> None:
     slap_slot = grid.session.comparison_slots[1]
     assert slap_slot.file_a_image.finger_position_code == "13"
     assert slap_slot.file_b_image.finger_position_code == "13"
-    assert "does not perform biometric matching" in DISCLAIMER
+    assert not grid.findChildren(QLabel, "disclaimer")
+    assert not grid.findChildren(QLabel, "sectionTitle")
+    assert not grid.findChildren(QLabel, "pairTitle")
+    assert [label.text() for label in grid.findChildren(QLabel, "recordHeaderTitle")] == [
+        "Reference Record",
+        "Comparison Record",
+    ]
+    assert [
+        label.text()
+        for label in grid.findChildren(QLabel, "recordHeaderReferenceNumber")
+    ] == [
+        "Reference number: REFERENCE-123",
+        "Reference number: COMPARISON-456",
+    ]
+    assert all(
+        "Reference Record" not in label.text() and "Comparison Record" not in label.text()
+        for label in grid.findChildren(QLabel, "cardTitle")
+    )
     assert len(grid._cards) == 8
     grid.close()
     application.processEvents()
@@ -79,15 +118,15 @@ def test_main_window_records_final_queue_decision(tmp_path) -> None:
     file_a = NistTransaction(source_path=file_a_path)
     file_b = NistTransaction(source_path=file_b_path)
     window = _window(tmp_path)
-    window._offer_session_export = lambda decisions: None
     window._file_a = file_a
     window._file_b = file_b
     window._review_queue.start(file_a, [file_b_path])
+    window._settings.set_offer_session_export(False)
 
     window._record_decision("NO_MATCH")
 
     assert window._history_store.count() == 1
-    assert window.results_label.text() == "Internal decision history: 1 record(s)"
+    assert window._history_store.query()[0]["timezone"] == window._settings.history_timezone_id()
     assert window.page_stack.currentWidget() is window.setup_page
     assert window._file_a is None
     assert window._file_b is None
@@ -108,10 +147,11 @@ def test_main_window_advances_to_next_candidate_after_decision(tmp_path) -> None
     file_a = NistTransaction(source_path=file_a_path)
     file_b1 = NistTransaction(source_path=file_b1_path)
     window = _window(tmp_path)
-    window._offer_session_export = lambda decisions: None
     window._file_a = file_a
     window._file_b = file_b1
     window._review_queue.start(file_a, [file_b1_path, file_b2_path])
+    window._first_pair_ready = True
+    window.page_stack.setCurrentWidget(window.workspace_page)
     requested: list[tuple[Path, str]] = []
     window._start_processing = lambda path, target: requested.append((path, target))
 
@@ -121,7 +161,10 @@ def test_main_window_advances_to_next_candidate_after_decision(tmp_path) -> None
     assert window._review_queue.current_path == file_b2_path
     assert window._file_a is file_a
     assert window._file_b is None
-    assert window.page_stack.currentWidget() is window.loading_page
+    assert window.page_stack.currentWidget() is window.workspace_page
+    assert window._workspace_loading
+    assert not window.workspace_page.isEnabled()
+    assert window._workspace_loading_effect.isEnabled()
     assert window._history_store.count() == 1
     window.close()
     application.processEvents()
@@ -136,7 +179,6 @@ def test_main_window_pass_advances_without_saving_history(tmp_path) -> None:
     file_a = NistTransaction(source_path=file_a_path)
     file_b = NistTransaction(source_path=file_b_path)
     window = _window(tmp_path)
-    window._offer_session_export = lambda decisions: None
     window._file_a = file_a
     window._file_b = file_b
     window._review_queue.start(file_a, [file_b_path])
@@ -144,7 +186,6 @@ def test_main_window_pass_advances_without_saving_history(tmp_path) -> None:
     window._record_decision("PASS")
 
     assert window._history_store.count() == 0
-    assert window.results_label.text() == "Internal decision history: 0 record(s)"
     assert "0 decision(s) saved to internal history" in window.statusBar().currentMessage()
     window.close()
     application.processEvents()
@@ -175,41 +216,98 @@ def test_single_setup_starts_reference_loading_and_uses_internal_history(tmp_pat
 
     window._processing_target = "a"
     window._processing_finished(NistTransaction(source_path=file_a_path))
-    assert window.results_label.text() == "Internal decision history: 0 record(s)"
     assert window._start_candidate_after_thread
     window.close()
     application.processEvents()
 
 
-def test_main_window_has_professional_menus_toolbar_and_hand_cursors(tmp_path) -> None:
+def test_main_window_has_professional_menus_without_toolbars(tmp_path) -> None:
     application = QApplication.instance() or QApplication([])
     window = _window(tmp_path)
-    window._offer_session_export = lambda decisions: None
-
     assert [action.text() for action in window.menuBar().actions()] == [
         "&File",
         "&Edit",
         "&View",
         "&Help",
     ]
-    assert window.main_toolbar.iconSize().width() == 20
-    assert window.export_history_action.text() == "Export Decision History..."
-    assert window.clear_history_action.text() == "Delete All Decision History..."
-    assert not window.clear_history_action.icon().isNull()
+    assert window.windowTitle() == "Nist Biometric Viewer"
+    assert window.size().width() == 1100
+    assert window.size().height() == 720
+    assert window.findChildren(QToolBar) == []
+    assert not hasattr(window, "export_history_action")
     assert window.match_button.cursor().shape() == Qt.CursorShape.PointingHandCursor
     assert window.no_match_button.cursor().shape() == Qt.CursorShape.PointingHandCursor
     assert window.pass_button.cursor().shape() == Qt.CursorShape.PointingHandCursor
     assert window.pass_button.text() == "PASS"
-    assert window.view_history_action.text() == "View Decision History..."
+    assert window.view_history_action.text() == "View Comparison History..."
     assert window.end_session_action.text() == "End Current Session"
-    assert all(
-        button.cursor().shape() == Qt.CursorShape.PointingHandCursor
-        for button in window.main_toolbar.findChildren(QToolButton)
+    assert window.settings_action.text() == "Settings..."
+    file_actions = [
+        action.text()
+        for action in window.file_menu.actions()
+        if not action.isSeparator()
+    ]
+    assert file_actions[-2:] == ["Settings...", "Exit"]
+    assert [action.text() for action in window.file_menu.actions()][-2:] == [
+        "Settings...",
+        "Exit",
+    ]
+    assert window.settings_action not in window.edit_menu.actions()
+    assert window.previous_button.parentWidget() is window.status_navigation_bar
+    assert window.end_session_button.parentWidget() is window.status_navigation_bar
+    assert not window.previous_button.icon().isNull()
+    assert not window.end_session_button.icon().isNull()
+    assert window.match_button.parentWidget() is window.bottom_decision_bar
+    assert window.no_match_button.parentWidget() is window.bottom_decision_bar
+    assert window.pass_button.parentWidget() is window.bottom_decision_bar
+    decision_layout = window.bottom_decision_bar.layout()
+    assert decision_layout.indexOf(window.pass_button) < decision_layout.indexOf(
+        window.no_match_button
     )
+    assert decision_layout.indexOf(window.no_match_button) < decision_layout.indexOf(
+        window.match_button
+    )
+    assert not any(group.title() == "Review queue" for group in window.findChildren(QGroupBox))
+    assert window.file_a_widgets["metadata"].isHidden()
+    assert window.file_b_widgets["metadata"].isHidden()
+    assert "#69737d" in APP_STYLESHEET
     assert application_icon_path().is_file()
     assert not window.windowIcon().isNull()
+    assert window.add_comparison_button.text() == ""
+    assert not window.add_comparison_button.icon().isNull()
+    assert "ZIP/RAR" in window.add_comparison_button.toolTip()
     assert window.page_stack.currentWidget() is window.setup_page
     window.close()
+    application.processEvents()
+
+
+def test_record_details_are_collapsed_until_requested(tmp_path) -> None:
+    application = QApplication.instance() or QApplication([])
+    window = _window(tmp_path)
+    details = window.file_a_widgets["details"]
+    metadata = window.file_a_widgets["metadata"]
+    assert isinstance(details, QGroupBox)
+
+    assert not details.isChecked()
+    assert metadata.isHidden()
+    details.setChecked(True)
+
+    assert not metadata.isHidden()
+    window.close()
+    application.processEvents()
+
+
+def test_new_comparison_pair_resets_grid_scroll_to_top() -> None:
+    application = QApplication.instance() or QApplication([])
+    session = build_cross_file_comparison([_image("1")], [_image("1")])
+    grid = ComparisonGrid()
+    grid.verticalScrollBar().setRange(0, 100)
+    grid.verticalScrollBar().setValue(80)
+
+    grid.set_session(session)
+
+    assert grid.verticalScrollBar().value() == 0
+    grid.close()
     application.processEvents()
 
 
@@ -220,6 +318,8 @@ def test_workspace_appears_only_after_first_complete_pair(tmp_path) -> None:
     file_a_path.write_bytes(b"a")
     file_b_path.write_bytes(b"b")
     window = _window(tmp_path)
+    maximized: list[bool] = []
+    window.showMaximized = lambda: maximized.append(True)
     requested: list[tuple[Path, str]] = []
     window._start_processing = lambda path, target: requested.append((path, target))
 
@@ -237,6 +337,11 @@ def test_workspace_appears_only_after_first_complete_pair(tmp_path) -> None:
     window._processing_target = "b"
     window._processing_finished(NistTransaction(source_path=file_b_path))
     assert window.page_stack.currentWidget() is window.workspace_page
+    assert not window._workspace_loading
+    assert window.workspace_page.isEnabled()
+    assert not window._workspace_loading_effect.isEnabled()
+    assert window.review_progress_label.text() == "Comparison 1 of 1: b.nist"
+    assert maximized == [True]
     window.close()
     application.processEvents()
 
@@ -254,7 +359,7 @@ def test_manually_selected_same_file_shows_pass_warning(tmp_path) -> None:
     session = window._refresh_comparison()
 
     assert "same file" in session.warnings[0]
-    assert "PASS is not saved to decision history" in session.warnings[0]
+    assert "PASS is not saved to history" in session.warnings[0]
     assert window.comparison_grid.session is session
     window.close()
     application.processEvents()
@@ -270,7 +375,68 @@ def test_setup_dialog_collects_reference_and_candidate_group(tmp_path) -> None:
 
     assert dialog.file_a_path == file_a_path
     assert dialog.candidate_paths == candidate_paths
-    assert dialog.candidate_list.count() == 2
+    assert dialog.record_list.count() == 3
+    assert dialog.record_list.item(0).text().startswith("ANSI/NIST Record:")
+    assert isinstance(dialog.reference_list, ReferenceRecordList)
+    assert dialog.reference_list.item(0).text() == "a.nist"
+    dialog.close()
+    application.processEvents()
+
+
+def test_setup_dialog_appoints_reference_from_one_unified_record_group(tmp_path) -> None:
+    application = QApplication.instance() or QApplication([])
+    paths = [tmp_path / name for name in ("one.nist", "two.an2", "three.eft")]
+    dialog = ComparisonSetupDialog(tmp_path)
+
+    dialog.set_record_selection(paths)
+
+    assert dialog.file_a_path is None
+    assert dialog.candidate_paths == []
+    dialog.reference_list.select_reference(paths[1])
+
+    assert dialog.file_a_path == paths[1]
+    assert dialog.candidate_paths == [paths[0], paths[2]]
+    assert dialog.reference_list.currentItem().text() == "two.an2"
+    dialog.close()
+    application.processEvents()
+
+
+def test_setup_dialog_adds_individual_record_selections_incrementally(tmp_path) -> None:
+    application = QApplication.instance() or QApplication([])
+    paths = [tmp_path / name for name in ("one.nist", "two.nist", "three.nist")]
+    dialog = ComparisonSetupDialog(tmp_path)
+
+    dialog.set_source_selection(paths[:2])
+    dialog.set_source_selection(paths[1:])
+
+    assert dialog.record_list.count() == 3
+    assert dialog._record_paths == paths
+    dialog.close()
+    application.processEvents()
+
+
+def test_setup_dialog_accepts_dragged_record_group_and_zip(tmp_path) -> None:
+    application = QApplication.instance() or QApplication([])
+    records = [tmp_path / "one.nist", tmp_path / "two.dat"]
+    archive = tmp_path / "records.zip"
+    dialog = ComparisonSetupDialog(tmp_path)
+
+    record_drop = _drop_event(records)
+    dialog.source_list.dropEvent(record_drop)
+
+    assert record_drop.accepted
+    assert dialog.record_list.count() == 2
+    assert dialog.file_a_path is None
+    assert not hasattr(dialog, "source_tabs")
+
+    archive_drop = _drop_event([archive])
+    dialog.source_list.dropEvent(archive_drop)
+
+    assert archive_drop.accepted
+    assert dialog.archive_path == archive
+    assert dialog.source_list.count() == 1
+    assert dialog.source_list.item(0).text() == f"ZIP Archive: {archive}"
+    assert not hasattr(dialog, "archive_edit")
     dialog.close()
     application.processEvents()
 
@@ -285,6 +451,118 @@ def test_setup_dialog_accepts_zip_archive_as_alternative(tmp_path) -> None:
     assert dialog.archive_path == archive_path
     assert dialog.file_a_path is None
     assert dialog.candidate_paths == []
+    dialog.close()
+    application.processEvents()
+
+
+def test_setup_dialog_accepts_rar_archive_as_alternative(tmp_path) -> None:
+    application = QApplication.instance() or QApplication([])
+    archive_path = tmp_path / "records.rar"
+    dialog = ComparisonSetupDialog(tmp_path)
+
+    dialog.set_archive_selection(archive_path)
+
+    assert dialog.archive_path == archive_path
+    assert dialog.source_list.item(0).text() == f"RAR Archive: {archive_path}"
+    assert "extract" in dialog.source_status.text()
+    dialog.close()
+    application.processEvents()
+
+
+def test_setup_dialog_uses_source_then_reference_phases(tmp_path) -> None:
+    application = QApplication.instance() or QApplication([])
+    paths = [tmp_path / "one.nist", tmp_path / "two.nist"]
+    dialog = ComparisonSetupDialog(tmp_path)
+    dialog.set_record_selection(paths)
+
+    assert dialog.phase_stack.currentIndex() == 0
+    assert not hasattr(dialog, "back_button")
+    dialog._go_next()
+
+    assert dialog.phase_stack.currentIndex() == 1
+    assert dialog.file_a_path is None
+    dialog.reference_list.select_reference(paths[0])
+    assert dialog.file_a_path == paths[0]
+    dialog.close()
+    application.processEvents()
+
+
+def test_initial_screen_accepts_supported_drop_and_opens_setup(tmp_path) -> None:
+    application = QApplication.instance() or QApplication([])
+    paths = [tmp_path / "one.nist", tmp_path / "two.nist"]
+    window = _window(tmp_path)
+    opened: list[list[Path]] = []
+    window._open_comparison_setup = lambda initial_paths=None: opened.append(initial_paths)
+    event = _drop_event(paths)
+
+    window.dropEvent(event)
+
+    assert event.accepted
+    assert opened == [paths]
+    window.close()
+    application.processEvents()
+
+
+def test_image_viewer_uses_explicit_zoom_controls_and_ignores_wheel_zoom() -> None:
+    application = QApplication.instance() or QApplication([])
+    viewer = ImageViewer()
+    viewer.set_pixmap(QPixmap(200, 200))
+    initial_scale = viewer.transform().m11()
+
+    viewer.zoom_in()
+    zoomed_scale = viewer.transform().m11()
+    viewer.zoom_out()
+    wheel_event = _IgnoredWheelEvent()
+    viewer.wheelEvent(wheel_event)  # type: ignore[arg-type]
+
+    assert zoomed_scale > initial_scale
+    assert viewer.transform().m11() == initial_scale
+    assert wheel_event.ignored
+    assert not viewer._tool_overlay.isHidden()
+    assert all(
+        not button.icon().isNull()
+        for button in (viewer.zoom_out_button, viewer.fit_button, viewer.zoom_in_button)
+    )
+    viewer.close()
+    application.processEvents()
+
+
+def test_fingerprint_cards_expose_per_image_controls() -> None:
+    application = QApplication.instance() or QApplication([])
+    session = build_cross_file_comparison([_image("1")], [_image("1")])
+    grid = ComparisonGrid()
+
+    grid.set_session(session)
+
+    assert len(grid._cards) == 2
+    for card in grid._cards:
+        assert card.zoom_in_button.toolTip() == "Zoom In"
+        assert card.zoom_out_button.toolTip() == "Zoom Out"
+        assert card.fit_button.toolTip() == "Fit Image"
+        assert card.zoom_in_button.parentWidget() is card.viewer._tool_overlay
+        assert card.zoom_out_button.parentWidget() is card.viewer._tool_overlay
+        assert card.fit_button.parentWidget() is card.viewer._tool_overlay
+        assert not card.zoom_in_button.icon().isNull()
+        assert not card.zoom_out_button.icon().isNull()
+        assert not card.fit_button.icon().isNull()
+    grid.close()
+    application.processEvents()
+
+
+def test_archive_reference_dialog_selects_reference_record(tmp_path) -> None:
+    application = QApplication.instance() or QApplication([])
+    paths = [tmp_path / "first" / "record.nist", tmp_path / "second" / "record.nist"]
+    dialog = ArchiveReferenceDialog(paths)
+
+    assert dialog.reference_path is None
+    dialog.select_reference(paths[1])
+
+    assert dialog.reference_path == paths[1]
+    assert isinstance(dialog.record_list, ReferenceRecordList)
+    assert dialog.record_list.item(0).text() == str(Path("first") / "record.nist")
+    assert dialog.record_list.item(1).text() == str(Path("second") / "record.nist")
+    assert dialog.windowTitle() == "Select Reference Record"
+    assert any(button.text() == "Next" for button in dialog.findChildren(QPushButton))
     dialog.close()
     application.processEvents()
 
@@ -311,14 +589,11 @@ def test_archive_selection_loads_extracted_files_then_cleans_temporary_directory
     file_b = extraction_directory / "B-fp.nist"
     file_a.write_bytes(b"a")
     file_b.write_bytes(b"b")
-    window._archive_processing_finished(
-        ArchiveComparisonSelection(
-            file_a_path=file_a,
-            candidate_paths=[file_b],
-            file_a_reference="REF",
-            candidate_references={file_b: "B"},
-        )
+    window._select_archive_reference = lambda contents: ArchiveComparisonSelection(
+        file_a_path=file_a,
+        candidate_paths=[file_b],
     )
+    window._archive_processing_finished(ArchiveContents([file_a, file_b]))
     window._thread_finished()
 
     assert parse_requests == [(file_a, "a")]
@@ -381,7 +656,6 @@ def test_end_session_keeps_completed_records_and_returns_to_setup(
     file_a = NistTransaction(source_path=file_a_path)
     file_b1 = NistTransaction(source_path=file_b1_path)
     window = _window(tmp_path)
-    window._offer_session_export = lambda decisions: None
     window._file_a = file_a
     window._file_b = NistTransaction(source_path=file_b2_path)
     window._review_queue.start(file_a, [file_b1_path, file_b2_path])
@@ -403,99 +677,94 @@ def test_end_session_keeps_completed_records_and_returns_to_setup(
     application.processEvents()
 
 
-def test_completed_session_export_writes_only_session_rows_and_opens_folder(
+def test_completed_session_offers_to_export_only_its_saved_results(
     tmp_path,
     monkeypatch,
 ) -> None:
     application = QApplication.instance() or QApplication([])
-    output = tmp_path / "nist_session_decisions.xlsx"
-    file_a_path = tmp_path / "a.nist"
-    file_b_path = tmp_path / "b.nist"
-    file_a_path.write_bytes(b"a")
-    file_b_path.write_bytes(b"b")
-    file_a = NistTransaction(source_path=file_a_path)
-    file_b = NistTransaction(source_path=file_b_path)
+    output = tmp_path / "session-results.xlsx"
+    file_a = NistTransaction(source_path=tmp_path / "a.nist")
+    file_b = NistTransaction(source_path=tmp_path / "b.nist")
+    file_a.source_path.write_bytes(b"a")
+    file_b.source_path.write_bytes(b"b")
     window = _window(tmp_path)
-    window._review_queue.start(file_a, [file_b_path])
-    decision = window._review_queue.record("MATCH", file_b)
-    window._history_store.append(decision)
-    monkeypatch.setattr(window._settings, "default_session_export_path", lambda: output)
+    window._file_a = file_a
+    window._file_b = file_b
+    window._review_queue.start(file_a, [file_b.source_path])
     monkeypatch.setattr(
         QMessageBox,
         "question",
         lambda *args: QMessageBox.StandardButton.Yes,
     )
-    opened: list[str] = []
     monkeypatch.setattr(
-        QDesktopServices,
-        "openUrl",
-        lambda url: opened.append(url.toLocalFile()) or True,
+        QFileDialog,
+        "getSaveFileName",
+        lambda *args: (str(output), "Excel workbooks (*.xlsx)"),
     )
 
-    exported = window._offer_session_export([decision])
+    window._record_decision("MATCH")
 
-    assert exported == output
     assert output.exists()
-    assert [Path(path) for path in opened] == [tmp_path]
+    assert "Session results exported" in window.statusBar().currentMessage()
     window.close()
     application.processEvents()
 
 
-def test_pass_only_session_is_not_exported(tmp_path, monkeypatch) -> None:
+def test_ended_session_offers_to_export_its_completed_results(
+    tmp_path,
+    monkeypatch,
+) -> None:
     application = QApplication.instance() or QApplication([])
-    output = tmp_path / "nist_session_decisions.xlsx"
+    output = tmp_path / "ended-session-results.xlsx"
+    file_a = NistTransaction(source_path=tmp_path / "a.nist")
+    file_b1 = NistTransaction(source_path=tmp_path / "b1.nist")
+    file_b2 = NistTransaction(source_path=tmp_path / "b2.nist")
+    window = _window(tmp_path)
+    window._file_a = file_a
+    window._file_b = file_b2
+    window._review_queue.start(file_a, [file_b1.source_path, file_b2.source_path])
+    decision = window._review_queue.record("NO_MATCH", file_b1)
+    window._history_store.append(decision)
+    window._candidate_ready = True
+    monkeypatch.setattr(
+        QMessageBox,
+        "question",
+        lambda *args: QMessageBox.StandardButton.Yes,
+    )
+    monkeypatch.setattr(
+        QFileDialog,
+        "getSaveFileName",
+        lambda *args: (str(output), "Excel workbooks (*.xlsx)"),
+    )
+
+    window._end_current_session()
+
+    assert output.exists()
+    assert "Session results exported" in window.statusBar().currentMessage()
+    window.close()
+    application.processEvents()
+
+
+def test_session_export_prompt_can_be_disabled(tmp_path, monkeypatch) -> None:
+    application = QApplication.instance() or QApplication([])
     file_a = NistTransaction(source_path=tmp_path / "a.nist")
     file_b = NistTransaction(source_path=tmp_path / "b.nist")
     window = _window(tmp_path)
+    window._settings.set_offer_session_export(False)
     window._review_queue.start(file_a, [file_b.source_path])
-    decision = window._review_queue.record("PASS", file_b)
-    monkeypatch.setattr(window._settings, "default_session_export_path", lambda: output)
-    monkeypatch.setattr(
-        QMessageBox,
-        "question",
-        lambda *args: pytest.fail("PASS-only sessions must not prompt for export"),
-    )
-
-    exported = window._offer_session_export([decision])
-
-    assert exported is None
-    assert not output.exists()
-    window.close()
-    application.processEvents()
-
-
-def test_completed_session_export_uses_selected_alternative_for_collision(
-    tmp_path,
-    monkeypatch,
-) -> None:
-    application = QApplication.instance() or QApplication([])
-    output = tmp_path / "session.xlsx"
-    alternative = tmp_path / "session_2.xlsx"
-    output.write_bytes(b"existing")
-    file_a_path = tmp_path / "a.nist"
-    file_b_path = tmp_path / "b.nist"
-    file_a_path.write_bytes(b"a")
-    file_b_path.write_bytes(b"b")
-    file_a = NistTransaction(source_path=file_a_path)
-    file_b = NistTransaction(source_path=file_b_path)
-    window = _window(tmp_path)
-    window._review_queue.start(file_a, [file_b_path])
     decision = window._review_queue.record("MATCH", file_b)
-    window._history_store.append(decision)
-    monkeypatch.setattr(window._settings, "default_session_export_path", lambda: output)
+    decision.history_id = 1
+    prompted: list[bool] = []
     monkeypatch.setattr(
         QMessageBox,
         "question",
-        lambda *args: QMessageBox.StandardButton.Yes,
+        lambda *args: prompted.append(True) or QMessageBox.StandardButton.Yes,
     )
-    monkeypatch.setattr(window, "_resolve_existing_session_export", lambda path: alternative)
-    monkeypatch.setattr(QDesktopServices, "openUrl", lambda url: True)
 
-    exported = window._offer_session_export([decision])
+    window._finish_review()
 
-    assert exported == alternative
-    assert output.read_bytes() == b"existing"
-    assert alternative.exists()
+    assert "Review complete" in window.statusBar().currentMessage()
+    assert prompted == []
     window.close()
     application.processEvents()
 
@@ -514,14 +783,84 @@ def test_history_dialog_displays_current_database_records(tmp_path) -> None:
     dialog = DecisionHistoryDialog(window._history_store.query())
 
     assert dialog.table.rowCount() == 1
-    assert dialog.table.item(0, 1).text() == "NO_MATCH"
+    assert dialog.table.item(0, 1).text() == "UTC"
+    assert dialog.table.item(0, 2).text() == "NO_MATCH"
     assert dialog.summary_label.text() == "1 decision record(s)"
+    assert dialog.export_history_button.text() == "Export History..."
+    assert not dialog.export_history_button.isEnabled()
+    assert dialog.delete_selected_button.text() == "Delete Selected Row..."
+    assert not dialog.delete_selected_button.isEnabled()
+    assert dialog.delete_history_button.text() == "Delete All History..."
+    assert not dialog.delete_history_button.isEnabled()
     dialog.close()
     window.close()
     application.processEvents()
 
 
-def test_main_window_can_delete_all_history_and_detach_active_decisions(
+def test_history_dialog_exports_only_through_its_export_button(tmp_path) -> None:
+    application = QApplication.instance() or QApplication([])
+    window = _window(tmp_path)
+    file_a = NistTransaction(source_path=tmp_path / "a.nist")
+    file_b = NistTransaction(source_path=tmp_path / "b.nist")
+    window._review_queue.start(file_a, [file_b.source_path])
+    decision = window._review_queue.record("MATCH", file_b)
+    window._history_store.append(decision)
+    exported: list[bool] = []
+    dialog = DecisionHistoryDialog(
+        window._history_store.query(),
+        export_history=lambda: exported.append(True),
+    )
+
+    assert not hasattr(window, "export_history_action")
+    assert dialog.export_history_button.isEnabled()
+    dialog.export_history_button.click()
+
+    assert exported == [True]
+    dialog.close()
+    window.close()
+    application.processEvents()
+
+
+def test_history_dialog_can_delete_selected_row_and_detach_active_decision(
+    tmp_path,
+    monkeypatch,
+) -> None:
+    application = QApplication.instance() or QApplication([])
+    file_a = NistTransaction(source_path=tmp_path / "a.nist")
+    file_b1 = NistTransaction(source_path=tmp_path / "b1.nist")
+    file_b2 = NistTransaction(source_path=tmp_path / "b2.nist")
+    window = _window(tmp_path)
+    window._review_queue.start(file_a, [file_b1.source_path, file_b2.source_path])
+    first = window._review_queue.record("MATCH", file_b1)
+    second = window._review_queue.record("NO_MATCH", file_b2)
+    window._history_store.append(first)
+    window._history_store.append(second)
+    monkeypatch.setattr(
+        QMessageBox,
+        "warning",
+        lambda *args: QMessageBox.StandardButton.Yes,
+    )
+    dialog = DecisionHistoryDialog(
+        window._history_store.query(),
+        delete_record=window._delete_history_record,
+    )
+
+    dialog.table.selectRow(0)
+    assert dialog.delete_selected_button.isEnabled()
+    dialog.delete_selected_button.click()
+
+    assert dialog.table.rowCount() == 1
+    assert dialog.summary_label.text() == "1 decision record(s)"
+    assert window._history_store.count() == 1
+    assert first.history_id is None
+    assert second.history_id is not None
+    assert "Deleted selected decision-history record" in window.statusBar().currentMessage()
+    dialog.close()
+    window.close()
+    application.processEvents()
+
+
+def test_history_dialog_can_delete_all_history_and_detach_active_decisions(
     tmp_path,
     monkeypatch,
 ) -> None:
@@ -537,14 +876,22 @@ def test_main_window_can_delete_all_history_and_detach_active_decisions(
         "warning",
         lambda *args: QMessageBox.StandardButton.Yes,
     )
+    dialog = DecisionHistoryDialog(
+        window._history_store.query(),
+        clear_history=window._delete_all_history_records,
+    )
 
-    window._clear_history()
+    assert dialog.delete_history_button.isEnabled()
+    dialog.delete_history_button.click()
 
     assert window._history_store.count() == 0
     assert decision.history_id is None
-    assert window.results_label.text() == "Internal decision history: 0 record(s)"
     assert "Deleted 1 decision-history record(s)" in window.statusBar().currentMessage()
-    assert window._offer_session_export(window._review_queue.decisions) is None
+    assert dialog.table.rowCount() == 0
+    assert not dialog.export_history_button.isEnabled()
+    assert not dialog.delete_history_button.isEnabled()
+    assert not hasattr(window, "clear_history_action")
+    dialog.close()
     window.close()
     application.processEvents()
 
@@ -566,7 +913,7 @@ def test_about_dialog_uses_clickable_professional_contact_details() -> None:
     assert dialog.details_label.openExternalLinks()
     assert "Visual review only" in dialog.details_label.text()
     assert "github.com/nekcht" in dialog.details_label.text()
-    assert dialog.windowTitle() == "About NIST Fingerprint Comparator"
+    assert dialog.windowTitle() == "About Nist Biometric Viewer"
     dialog.close()
     application.processEvents()
 
@@ -584,3 +931,45 @@ def test_export_dialog_supports_optional_utc_range() -> None:
     assert start.tzinfo is not None and end.tzinfo is not None
     dialog.close()
     application.processEvents()
+
+
+def test_settings_dialog_lists_and_selects_history_timezone() -> None:
+    application = QApplication.instance() or QApplication([])
+    dialog = SettingsDialog("UTC", False)
+
+    assert dialog.history_timezone_id == "UTC"
+    assert dialog.timezone_combo.count() > 1
+    assert dialog.windowTitle() == "Settings"
+    assert not dialog.offer_session_export
+    dialog.offer_session_export_checkbox.setChecked(True)
+    assert dialog.offer_session_export
+    dialog.close()
+    application.processEvents()
+
+
+def _drop_event(paths: list[Path]):
+    return _DropEvent(paths)
+
+
+class _DropEvent:
+    def __init__(self, paths: list[Path]) -> None:
+        self._mime_data = QMimeData()
+        self._mime_data.setUrls([QUrl.fromLocalFile(str(path)) for path in paths])
+        self.accepted = False
+
+    def mimeData(self) -> QMimeData:  # noqa: N802
+        return self._mime_data
+
+    def acceptProposedAction(self) -> None:  # noqa: N802
+        self.accepted = True
+
+    def ignore(self) -> None:
+        self.accepted = False
+
+
+class _IgnoredWheelEvent:
+    def __init__(self) -> None:
+        self.ignored = False
+
+    def ignore(self) -> None:
+        self.ignored = True

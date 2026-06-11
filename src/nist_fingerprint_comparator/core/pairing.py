@@ -78,7 +78,7 @@ def build_cross_file_comparison(
     file_a_images: list[BiometricImage],
     file_b_images: list[BiometricImage],
 ) -> ComparisonSession:
-    """Build File A versus File B rows while preserving every biometric image."""
+    """Build Reference Record versus Comparison Record rows while preserving every image."""
     session = ComparisonSession()
     file_a_by_code, file_a_unmapped = _group_images(file_a_images)
     file_b_by_code, file_b_unmapped = _group_images(file_b_images)
@@ -107,14 +107,17 @@ def build_cross_file_comparison(
             )
             session.warnings.extend(warnings)
 
-    for source, images in (("File A", file_a_unmapped), ("File B", file_b_unmapped)):
+    for source, images in (
+        ("Reference Record", file_a_unmapped),
+        ("Comparison Record", file_b_unmapped),
+    ):
         for index, image in enumerate(images, start=1):
             session.comparison_slots.append(
                 ComparisonSlot(
                     position_code=None,
                     finger_name=f"Unmapped biometric impression {index} ({source})",
-                    file_a_image=image if source == "File A" else None,
-                    file_b_image=image if source == "File B" else None,
+                    file_a_image=image if source == "Reference Record" else None,
+                    file_b_image=image if source == "Comparison Record" else None,
                 )
             )
     return session

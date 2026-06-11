@@ -27,12 +27,12 @@ class ArchiveWorker(QObject):
     @Slot()
     def run(self) -> None:
         try:
-            self.progress.emit("Extracting and classifying ANSI/NIST files...")
-            selection = prepare_comparison_archive(self.archive_path, self.destination)
-            self.finished.emit(selection)
+            self.progress.emit("Extracting ANSI/NIST records...")
+            contents = prepare_comparison_archive(self.archive_path, self.destination)
+            self.finished.emit(contents)
         except Exception as exc:
             LOGGER.exception("Comparison archive processing failed")
-            self.failed.emit(f"Could not prepare the selected ZIP archive: {exc}")
+            self.failed.emit(f"Could not prepare the selected archive: {exc}")
 
 
 class ParseWorker(QObject):

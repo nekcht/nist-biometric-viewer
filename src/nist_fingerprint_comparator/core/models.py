@@ -57,6 +57,11 @@ class NistTransaction:
     descriptive_metadata: dict[str, str] = field(default_factory=dict)
     warnings: list[str] = field(default_factory=list)
 
+    @property
+    def reference_number(self) -> str:
+        """Return the user-defined Type-2 MN1/2.012 reference number, when present."""
+        return self.descriptive_metadata.get("MN1", "").strip()
+
 
 @dataclass(slots=True)
 class ComparisonSlot:

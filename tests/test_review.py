@@ -7,6 +7,7 @@ from openpyxl import load_workbook
 
 from nist_fingerprint_comparator.core.models import NistTransaction
 from nist_fingerprint_comparator.core.review import (
+    DISPLAY_HISTORY_COLUMNS,
     HISTORY_COLUMNS,
     DecisionHistoryStore,
     DecisionXlsxExporter,
@@ -19,7 +20,11 @@ from nist_fingerprint_comparator.core.review import (
 
 def _transaction(path: Path, control_number: str) -> NistTransaction:
     path.write_bytes(f"transaction-{control_number}".encode())
-    return NistTransaction(source_path=path, transaction_metadata={"1.009": control_number})
+    return NistTransaction(
+        source_path=path,
+        transaction_metadata={"1.009": control_number},
+        descriptive_metadata={"MN1": f"MN1-{control_number}"},
+    )
 
 
 def _decision(
@@ -35,6 +40,8 @@ def _decision(
         file_a=_transaction(tmp_path / f"a-{suffix}.nist", f"A-{suffix}"),
         file_b=_transaction(tmp_path / f"b-{suffix}.nist", f"B-{suffix}"),
         timestamp_utc=timestamp,
+        timestamp=timestamp,
+        timezone="UTC",
     )
 
 
@@ -101,6 +108,8 @@ def test_internal_history_query_filters_utc_time_range(tmp_path: Path) -> None:
     )
 
     assert [row["file_a_transaction_control_number"] for row in rows] == ["A-2"]
+    assert rows[0]["file_a_reference_number"] == "MN1-A-2"
+    assert rows[0]["file_b_reference_number"] == "MN1-B-2"
 
 
 def test_internal_history_can_delete_exact_session_decision(tmp_path: Path) -> None:
@@ -115,6 +124,20 @@ def test_internal_history_can_delete_exact_session_decision(tmp_path: Path) -> N
     assert store.count() == 1
     assert store.query()[0]["file_a_transaction_control_number"] == "A-1"
     assert second.history_id is None
+
+
+def test_internal_history_can_delete_record_by_hidden_history_id(tmp_path: Path) -> None:
+    store = DecisionHistoryStore(tmp_path / "history.sqlite3")
+    first = _decision(tmp_path, "1", "2026-06-10T08:00:00+00:00")
+    second = _decision(tmp_path, "2", "2026-06-10T09:00:00+00:00", "NO_MATCH")
+    store.append(first)
+    store.append(second)
+    history_id = int(store.query()[0]["history_id"])
+
+    store.delete_by_id(history_id)
+
+    assert store.count() == 1
+    assert store.query()[0]["decision"] == "NO_MATCH"
 
 
 def test_internal_history_can_delete_all_records(tmp_path: Path) -> None:
@@ -175,6 +198,8 @@ def test_existing_history_database_removes_sha_columns_and_pass_rows(tmp_path: P
 
     assert columns == ["id", *HISTORY_COLUMNS]
     assert [row["decision"] for row in store.query()] == ["MATCH", "NO_MATCH"]
+    assert store.query()[0]["file_a_reference_number"] == ""
+    assert store.query()[0]["file_b_reference_number"] == ""
     assert all("sha256" not in column for column in HISTORY_COLUMNS)
 
 
@@ -185,13 +210,19 @@ def test_xlsx_export_contains_minimal_history_columns(tmp_path: Path) -> None:
     DecisionXlsxExporter().export(output, [decision_record(decision)])
 
     workbook = load_workbook(output, read_only=True)
-    rows = list(workbook["Decision History"].iter_rows(values_only=True))
+    rows = list(workbook["Comparison History"].iter_rows(values_only=True))
     assert len(rows) == 2
-    assert len(rows[0]) == len(HISTORY_COLUMNS)
-    assert rows[1][1] == "NO_MATCH"
-    assert rows[1][3] == "A-1"
-    assert rows[1][5] == "B-1"
+    assert len(rows[0]) == len(DISPLAY_HISTORY_COLUMNS)
+    assert rows[1][2] == "NO_MATCH"
+    assert rows[1][4] == "MN1-A-1"
+    assert rows[1][5] == "A-1"
+    assert rows[1][7] == "MN1-B-1"
+    assert rows[1][8] == "B-1"
     assert all("SHA-256" not in str(header) for header in rows[0])
+    assert "Reference Record Name" in rows[0]
+    assert "Reference Record Reference Number (MN1)" in rows[0]
+    assert "Comparison Record Name" in rows[0]
+    assert "Comparison Record Reference Number (MN1)" in rows[0]
 
 
 def test_available_export_path_uses_first_free_numbered_name(tmp_path: Path) -> None:

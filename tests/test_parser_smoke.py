@@ -17,7 +17,10 @@ def _tagged_record(record_type: int, fields: list[tuple[str, bytes]]) -> bytes:
 
 def test_parser_smoke_with_minimal_tagged_records() -> None:
     type_1 = _tagged_record(1, [("002", b"0500"), ("004", b"CAR")])
-    type_2 = _tagged_record(2, [("002", b"1"), ("010", b"CASE-42")])
+    type_2 = _tagged_record(
+        2,
+        [("002", b"1"), ("012", b"GR2SAP20260604921537")],
+    )
     type_14 = _tagged_record(
         14,
         [
@@ -42,7 +45,9 @@ def test_parser_smoke_with_minimal_tagged_records() -> None:
     assert len(transaction.records) == 3
     assert transaction.version == "0500"
     assert transaction.transaction_type == "CAR"
-    assert transaction.descriptive_metadata["2.010"] == "CASE-42"
+    assert transaction.descriptive_metadata["2.012"] == "GR2SAP20260604921537"
+    assert transaction.descriptive_metadata["MN1"] == "GR2SAP20260604921537"
+    assert transaction.reference_number == "GR2SAP20260604921537"
     image = transaction.biometric_images[0]
     assert image.record_type == 14
     assert image.finger_name == "Left Index"
@@ -60,6 +65,15 @@ def test_parser_returns_warnings_for_unrecognized_data() -> None:
     assert len(transaction.records) == 1
     assert transaction.records[0].record_type == 0
     assert transaction.warnings
+
+
+def test_parser_extracts_literal_type_2_mn1_user_defined_key() -> None:
+    type_2 = _tagged_record(2, [("002", b"1"), ("MN1", b"UNIQUE-REFERENCE")])
+
+    transaction = NistParser().parse_bytes(type_2, Path("sample.nist"))
+
+    assert transaction.reference_number == "UNIQUE-REFERENCE"
+    assert transaction.descriptive_metadata["MN1"] == "UNIQUE-REFERENCE"
 
 
 def test_empty_input_is_nonfatal() -> None:

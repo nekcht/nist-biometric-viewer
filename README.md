@@ -1,9 +1,9 @@
-# NIST Fingerprint Comparator
+# Nist Biometric Viewer
 
-NIST Fingerprint Comparator is a Python Qt desktop application for reviewing biometric
-images embedded in ANSI/NIST transaction files. It compares one reference File A against
-an ordered queue of File B candidates, placing the same standard finger positions side by
-side for visual review.
+Nist Biometric Viewer is a Python Qt desktop application for reviewing biometric
+images embedded in ANSI/NIST transaction files. It compares one Reference Record against
+an ordered group of Comparison Records, placing the same standard finger positions side
+by side for visual review.
 
 The parser is deliberately warning-based: malformed, unknown, and unsupported records are
 retained where possible instead of causing the entire transaction to fail.
@@ -11,14 +11,17 @@ retained where possible instead of causing the entire transaction to fail.
 ## Features
 
 - Professional PySide6 desktop interface with a transaction summary and warning sidebar
-- Single-step setup using either a comparison ZIP archive or individually selected files
-- Responsive background parsing and decoding with an animated loading screen
-- Same-position File A/File B comparison for every biometric impression
+- Guided source and Reference Record phases that auto-detect a multi-selected or
+  drag-and-dropped ANSI/NIST record group, ZIP archive, or RAR archive
+- Responsive background parsing and decoding with an initial loading screen and dimmed
+  in-place transitions between later pairs
+- Same-position Reference Record/Comparison Record review for every biometric impression
 - One-to-many review queue with **MATCH**, **NO MATCH**, and uncertain **PASS** decisions
 - Previous-comparison correction and explicit end-session controls
 - Persistent internal SQLite decision history shared by all future review sessions
 - In-app history display, permanent history deletion, filterable XLSX export, and
-  professional menu/icon toolbar
+  professional menu-driven controls
+- Configurable timezone for recorded comparison-history timestamps
 - Cross-file rows for individual fingers, plain impressions, slaps, palms, combined
   captures, duplicates, and unknown position codes
 - Zoomable and pannable in-memory image previews
@@ -42,42 +45,45 @@ python -m pip install -e ".[dev]"
 python -m nist_fingerprint_comparator.app
 ```
 
-Choose **New Comparison** and either select the reference File A plus all File B candidates,
-or select one ZIP archive containing the complete group. A comparison archive must be named
-`<File A reference>_files.zip`; its NIST files must use names such as
-`<reference>-fp.nist`, `<reference>_fp.nist`, `<reference>-fi.nist`, or
-`<reference>_fi.nist`. The matching reference is selected as File A and the remaining NIST
-files become File B candidates.
+From the initial screen, select the **+** button or immediately drag and drop the complete
+ANSI/NIST record group, one ZIP archive, or one RAR archive. Select **Next**, appoint one
+file as the Reference Record, then select **Next** again to begin comparison. Every other
+record becomes a Comparison Record. Archives are extracted before the Reference Record
+phase. Archive and record filenames do not need to follow a naming convention.
 
-The visual comparison workspace remains hidden while the archive, reference, and first
-candidate load, then opens when the first complete pair is ready. An animated loading
-screen is shown before the first pair and between later candidates. Archive extraction,
-parsing, and decoding happen on worker threads, so the UI remains responsive. Extracted
-archive files are held in a temporary session directory and deleted when the review
-finishes, fails before opening, is replaced, or the application closes.
+The visual comparison workspace remains hidden while the archive, Reference Record, and
+first Comparison Record load, then opens when the first complete pair is ready. The initial
+pair uses the dedicated loading screen. Between later Comparison Records, the current
+workspace remains visible in a dimmed, disabled loading state. Archive extraction, parsing,
+and decoding happen on worker threads, so the UI remains responsive. Extracted archive
+files are held in a temporary session directory and deleted when the review finishes,
+fails before opening, is replaced, or the application closes.
 
-For each candidate, choose **MATCH**, **NO MATCH**, or **PASS** after visual review. Use
+Each displayed biometric image has its own overlaid icon controls for **Zoom In**,
+**Zoom Out**, and **Fit**. Images can be panned by dragging. Mouse-wheel scrolling does
+not zoom images.
+
+For each Comparison Record, choose **MATCH**, **NO MATCH**, or **PASS** after visual review. Use
 **PASS** to ignore a comparison without saving it to decision history. **MATCH** and
 **NO MATCH** choices are committed immediately to one internal SQLite history database
-before the next candidate is loaded. `NO MATCH` is stored as `NO_MATCH`.
+before the next Comparison Record is loaded. `NO MATCH` is stored as `NO_MATCH`.
 
 During an active session, **Previous Comparison** warns the reviewer, undoes the immediately
 preceding result, and reloads that pair for a fresh review.
 **End Session** stops the remaining queue while keeping decisions already completed. Use
-**View Decision History** to display all records currently held in the internal database.
-The minimal internal record includes the UTC timestamp, decision, filenames, and
-transaction control numbers.
+**View Comparison History** to display all records currently held in the internal database.
+The minimal internal record includes the selected-timezone timestamp, its timezone,
+canonical UTC time, decision, filenames, and transaction control numbers.
 After the last decision is recorded, the application clears the completed session and
-returns to the initial New Comparison screen. Before cleanup, it offers to export only the
-completed session's decisions to an XLSX workbook in the default output folder. After a
-successful export, the system file browser opens that folder. If the target workbook
-already exists, the reviewer can overwrite it, create an automatically numbered
-alternative, or cancel the export.
+returns to the initial New Comparison screen.
 
-Use **File > Export Decision History** to export the complete history, or an optional UTC
-date/time range, to a formatted XLSX workbook. Use **Delete All Decision History** to
-permanently erase the internal history after confirming the destructive action. The export
-dialog defaults to the Desktop.
+Use **View Comparison History > Export History** to export the complete history, or an
+optional UTC date/time range, to a formatted XLSX workbook. History export and permanent
+history deletion are available only inside **View Comparison History**. Deletion requires
+confirmation, and the export dialog defaults to the Desktop.
+
+Use **Edit > Settings** to select the timezone recorded and displayed for new history
+entries. Canonical UTC timestamps are retained internally for reliable filtering.
 
 The application is for visual review only. It does not perform biometric matching,
 similarity scoring, or identity verification.
@@ -101,13 +107,15 @@ image data. Profile-specific fields remain available as raw metadata.
 
 - WSQ decoding uses the declared `wsq` Pillow plugin. The application reports unsupported
   WSQ images without crashing if the plugin is unavailable on the running platform.
+- RAR extraction uses the declared `rarfile` package and requires a compatible RAR
+  extraction backend on the running system.
 - Type-4 parsing is partial because legacy binary layouts and encodings need additional
   profile-specific handling.
 - JPEG2000 support depends on the capabilities of the installed Pillow build.
 - ANSI/NIST versions and agency profiles vary. Unknown records and fields are retained or
   reported as warnings where practical.
 - Slaps, palms, latents, combined captures, unknown position codes, and duplicate records
-  are displayed as File A versus File B comparison rows. Missing-position records remain
+  are displayed as Reference Record versus Comparison Record rows. Missing-position records remain
   visible as one-sided rows. The application does not automatically match or score them.
 
 ## Security And Privacy

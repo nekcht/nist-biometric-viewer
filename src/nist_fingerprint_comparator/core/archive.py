@@ -1,119 +1,106 @@
-"""Secure extraction and classification of one-to-many comparison archives."""
+"""Secure extraction and user-directed classification of comparison archives."""
 
 from __future__ import annotations
 
-import re
 import stat
 from dataclasses import dataclass
 from pathlib import Path, PurePosixPath
 from zipfile import BadZipFile, ZipFile, ZipInfo
 
 from .errors import NistComparatorError
-from .pairing import files_have_same_content
 
-ARCHIVE_SUFFIX = "_files.zip"
-NIST_NAME_PATTERN = re.compile(r"^(?P<reference>.+)[_-](?:fp|fi)$", re.IGNORECASE)
+NIST_ARCHIVE_SUFFIXES = {".nist", ".an2", ".eft", ".dat"}
 
 
 class ComparisonArchiveError(NistComparatorError):
-    """Raised when a ZIP cannot provide one reference and at least one candidate."""
+    """Raised when an archive cannot provide a valid comparison group."""
+
+
+@dataclass(slots=True)
+class ArchiveContents:
+    nist_paths: list[Path]
 
 
 @dataclass(slots=True)
 class ArchiveComparisonSelection:
     file_a_path: Path
     candidate_paths: list[Path]
-    file_a_reference: str
-    candidate_references: dict[Path, str]
 
 
 def prepare_comparison_archive(
     archive_path: Path,
     destination: Path,
-) -> ArchiveComparisonSelection:
-    """Extract NIST files from an archive and identify File A from its filename."""
-    file_a_reference = archive_reference(archive_path)
+) -> ArchiveContents:
+    """Extract supported ANSI/NIST records for later user classification."""
     destination.mkdir(parents=True, exist_ok=True)
+    suffix = archive_path.suffix.casefold()
+    if suffix == ".zip":
+        nist_paths = _prepare_zip_archive(archive_path, destination)
+    elif suffix == ".rar":
+        nist_paths = _prepare_rar_archive(archive_path, destination)
+    else:
+        raise ComparisonArchiveError("Select a supported ZIP or RAR archive.")
+
+    if len(nist_paths) < 2:
+        raise ComparisonArchiveError(
+            "The archive must contain at least two supported ANSI/NIST records."
+        )
+    return ArchiveContents(
+        nist_paths=sorted(nist_paths, key=lambda path: str(path).casefold()),
+    )
+
+
+def _prepare_zip_archive(archive_path: Path, destination: Path) -> list[Path]:
     try:
         with ZipFile(archive_path) as archive:
-            nist_paths = _extract_nist_files(archive, destination)
+            return _extract_nist_files(archive, destination)
+    except ComparisonArchiveError:
+        raise
     except (BadZipFile, OSError, RuntimeError) as exc:
         raise ComparisonArchiveError(f"Could not read ZIP archive: {exc}") from exc
 
-    if not nist_paths:
-        raise ComparisonArchiveError("The ZIP archive does not contain any .nist files.")
 
-    references: dict[Path, str] = {}
-    invalid_names: list[str] = []
-    for path in nist_paths:
-        reference = nist_reference(path)
-        if reference is None:
-            invalid_names.append(path.name)
-        else:
-            references[path] = reference
-    if invalid_names:
-        examples = ", ".join(sorted(invalid_names)[:3])
+def _prepare_rar_archive(archive_path: Path, destination: Path) -> list[Path]:
+    try:
+        import rarfile
+    except ImportError as exc:
         raise ComparisonArchiveError(
-            "Every .nist filename must end in '-fp', '_fp', '-fi', or '_fi'. "
-            f"Invalid filename(s): {examples}"
-        )
+            "RAR support requires the 'rarfile' package and a compatible extraction backend."
+        ) from exc
+    try:
+        with rarfile.RarFile(archive_path) as archive:
+            return _extract_rar_nist_files(archive, destination)
+    except ComparisonArchiveError:
+        raise
+    except Exception as exc:
+        raise ComparisonArchiveError(f"Could not read RAR archive: {exc}") from exc
 
-    file_a_matches = [
-        path
-        for path, reference in references.items()
-        if reference.casefold() == file_a_reference.casefold()
-    ]
-    if not file_a_matches:
-        raise ComparisonArchiveError(
-            f"No .nist file matches File A reference '{file_a_reference}'."
-        )
-    if len(file_a_matches) > 1:
-        names = ", ".join(path.name for path in sorted(file_a_matches))
-        raise ComparisonArchiveError(
-            f"More than one .nist file matches File A reference '{file_a_reference}': {names}"
-        )
 
-    file_a_path = file_a_matches[0]
-    candidate_paths = sorted(
-        (
-            path
-            for path in nist_paths
-            if path != file_a_path and not files_have_same_content(file_a_path, path)
-        ),
-        key=lambda path: (references[path].casefold(), path.name.casefold()),
-    )
-    if not candidate_paths:
+def build_archive_comparison_selection(
+    contents: ArchiveContents,
+    reference_path: Path,
+) -> ArchiveComparisonSelection:
+    """Use the selected Reference Record and classify every other record for comparison."""
+    if reference_path not in contents.nist_paths:
         raise ComparisonArchiveError(
-            "The ZIP archive must contain at least one File B candidate that differs from File A."
+            "The selected Reference Record is not part of the extracted archive."
+        )
+    comparison_paths = [path for path in contents.nist_paths if path != reference_path]
+    if not comparison_paths:
+        raise ComparisonArchiveError(
+            "The archive must contain at least one Comparison Record."
         )
     return ArchiveComparisonSelection(
-        file_a_path=file_a_path,
-        candidate_paths=candidate_paths,
-        file_a_reference=file_a_reference,
-        candidate_references={path: references[path] for path in candidate_paths},
+        file_a_path=reference_path,
+        candidate_paths=comparison_paths,
     )
-
-
-def archive_reference(archive_path: Path) -> str:
-    name = archive_path.name
-    if not name.casefold().endswith(ARCHIVE_SUFFIX):
-        raise ComparisonArchiveError(f"The ZIP filename must end in '{ARCHIVE_SUFFIX}'.")
-    reference = name[: -len(ARCHIVE_SUFFIX)]
-    if not reference:
-        raise ComparisonArchiveError("The ZIP filename does not contain a File A reference.")
-    return reference
-
-
-def nist_reference(path: Path) -> str | None:
-    match = NIST_NAME_PATTERN.fullmatch(path.stem)
-    return match.group("reference") if match else None
 
 
 def _extract_nist_files(archive: ZipFile, destination: Path) -> list[Path]:
     root = destination.resolve()
     extracted: list[Path] = []
     for member in archive.infolist():
-        if member.is_dir() or not member.filename.casefold().endswith(".nist"):
+        if member.is_dir() or Path(member.filename).suffix.casefold() not in NIST_ARCHIVE_SUFFIXES:
             continue
         relative_path = _safe_member_path(member)
         output_path = root.joinpath(*relative_path.parts).resolve()
@@ -129,16 +116,47 @@ def _extract_nist_files(archive: ZipFile, destination: Path) -> list[Path]:
     return extracted
 
 
+def _extract_rar_nist_files(archive, destination: Path) -> list[Path]:
+    root = destination.resolve()
+    extracted: list[Path] = []
+    for member in archive.infolist():
+        filename = member.filename
+        if member.isdir() or Path(filename).suffix.casefold() not in NIST_ARCHIVE_SUFFIXES:
+            continue
+        symlink_attribute = getattr(member, "is_symlink", False)
+        is_symlink = (
+            symlink_attribute() if callable(symlink_attribute) else bool(symlink_attribute)
+        )
+        relative_path = _safe_named_member_path(filename, is_symlink)
+        output_path = root.joinpath(*relative_path.parts).resolve()
+        if not output_path.is_relative_to(root):
+            raise ComparisonArchiveError(f"Unsafe path found in RAR archive: {filename}")
+        if output_path.exists():
+            raise ComparisonArchiveError(f"Duplicate RAR destination path: {filename}")
+        output_path.parent.mkdir(parents=True, exist_ok=True)
+        with archive.open(member) as source, output_path.open("wb") as output:
+            while chunk := source.read(1024 * 1024):
+                output.write(chunk)
+        extracted.append(output_path)
+    return extracted
+
+
 def _safe_member_path(member: ZipInfo) -> PurePosixPath:
-    normalized = member.filename.replace("\\", "/")
+    return _safe_named_member_path(
+        member.filename,
+        stat.S_ISLNK(member.external_attr >> 16),
+    )
+
+
+def _safe_named_member_path(filename: str, is_symlink: bool) -> PurePosixPath:
+    normalized = filename.replace("\\", "/")
     path = PurePosixPath(normalized)
-    mode = member.external_attr >> 16
     if (
         path.is_absolute()
         or ".." in path.parts
         or not path.parts
         or ":" in path.parts[0]
-        or stat.S_ISLNK(mode)
+        or is_symlink
     ):
-        raise ComparisonArchiveError(f"Unsafe path found in ZIP archive: {member.filename}")
+        raise ComparisonArchiveError(f"Unsafe path found in archive: {filename}")
     return path

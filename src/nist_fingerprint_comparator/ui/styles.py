@@ -7,13 +7,6 @@ QMainWindow, QWidget {
     font-family: "Segoe UI", Arial, sans-serif;
     font-size: 10pt;
 }
-QToolBar {
-    background: #ffffff;
-    border: none;
-    border-bottom: 1px solid #d8dde3;
-    spacing: 6px;
-    padding: 5px 8px;
-}
 QToolButton, QPushButton {
     background: #ffffff;
     border: 1px solid #c9d0d8;
@@ -23,9 +16,13 @@ QToolButton, QPushButton {
 QToolButton:hover, QPushButton:hover {
     background: #e9edf1;
 }
-QWidget#decisionBar {
+QWidget#statusNavigationBar {
     background: #ffffff;
     border-bottom: 1px solid #d8dde3;
+}
+QWidget#bottomDecisionBar {
+    background: #ffffff;
+    border-top: 1px solid #d8dde3;
 }
 QWidget#setupPage, QWidget#loadingPage {
     background: #f1f3f5;
@@ -38,6 +35,16 @@ QLabel#setupTitle, QLabel#loadingTitle {
 QLabel#setupText, QLabel#loadingMessage {
     color: #52606d;
     font-size: 11pt;
+}
+QToolButton#addComparisonButton {
+    background: #ffffff;
+    border: 2px solid #8193a5;
+    border-radius: 38px;
+    padding: 12px;
+}
+QToolButton#addComparisonButton:hover {
+    background: #e6edf3;
+    border-color: #536f8a;
 }
 QProgressBar#loadingProgress {
     background: #e0e5ea;
@@ -58,10 +65,10 @@ QLabel#reviewProgress {
 }
 QPushButton#matchButton, QPushButton#noMatchButton, QPushButton#passButton {
     color: #ffffff;
-    font-size: 11pt;
+    font-size: 10pt;
     font-weight: 700;
-    min-width: 120px;
-    padding: 9px 18px;
+    min-width: 96px;
+    padding: 7px 14px;
 }
 QPushButton#matchButton {
     background: #287a4b;
@@ -78,11 +85,11 @@ QPushButton#noMatchButton:hover {
     background: #9e3333;
 }
 QPushButton#passButton {
-    background: #b17818;
-    border-color: #946313;
+    background: #69737d;
+    border-color: #59636c;
 }
 QPushButton#passButton:hover {
-    background: #986714;
+    background: #59636c;
 }
 QPushButton#matchButton:disabled,
 QPushButton#noMatchButton:disabled,
@@ -93,6 +100,14 @@ QPushButton#passButton:disabled {
 }
 QToolButton:disabled {
     color: #9ca4ad;
+}
+QPushButton#deleteHistoryButton {
+    color: #8c2f2f;
+    border-color: #d7aaaa;
+}
+QPushButton#deleteHistoryButton:hover {
+    background: #f7e8e8;
+    border-color: #bf7777;
 }
 QStatusBar {
     background: #ffffff;
@@ -137,17 +152,26 @@ QLabel#cardTitle {
     font-size: 12pt;
     font-weight: 600;
 }
-QLabel#pairTitle {
-    color: #4a5561;
-    font-size: 11pt;
-    font-weight: 600;
-    padding: 5px 2px;
+QFrame#imageToolOverlay {
+    background: rgba(32, 37, 43, 185);
+    border-radius: 5px;
 }
-QLabel#sectionTitle {
-    color: #27313b;
-    font-size: 15pt;
-    font-weight: 600;
-    padding: 14px 2px 4px 2px;
+QToolButton#imageToolButton {
+    background: transparent;
+    border: none;
+    padding: 4px;
+}
+QToolButton#imageToolButton:hover {
+    background: rgba(255, 255, 255, 45);
+}
+QListWidget#sourceDropList {
+    background: #ffffff;
+    border: 1px dashed #9ba8b5;
+    border-radius: 6px;
+    padding: 6px;
+}
+QLabel#sourceStatus {
+    color: #52606d;
 }
 QLabel#sourceTitle {
     color: #3f4a55;
@@ -155,18 +179,29 @@ QLabel#sourceTitle {
     font-weight: 600;
     padding: 8px 2px 2px 2px;
 }
-QLabel#disclaimer {
-    background: #e8eef4;
-    border: 1px solid #cbd7e2;
-    border-radius: 5px;
-    color: #334455;
-    padding: 9px;
-}
-QLabel#fileSummary {
+QFrame#recordHeader {
     background: #ffffff;
-    border: 1px solid #d8dde3;
-    border-radius: 5px;
-    padding: 9px;
+    border: 1px solid #cbd3db;
+    border-radius: 6px;
+}
+QLabel#recordHeaderTitle {
+    color: #27313b;
+    font-size: 13pt;
+    font-weight: 700;
+}
+QLabel#recordHeaderFilename {
+    color: #3f4a55;
+    font-size: 10pt;
+    font-weight: 600;
+}
+QLabel#recordHeaderReferenceNumber {
+    color: #27313b;
+    font-size: 10pt;
+    font-weight: 700;
+}
+QLabel#recordHeaderStats {
+    color: #697580;
+    font-size: 9pt;
 }
 QLabel#placeholder {
     color: #697580;

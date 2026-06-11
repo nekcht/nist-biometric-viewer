@@ -9,8 +9,8 @@ from PySide6.QtWidgets import QDialog, QDialogButtonBox, QHBoxLayout, QLabel, QV
 from .resources import application_icon_path
 
 ABOUT_TEXT = (
-    "<p>NIST Fingerprint Comparator supports structured visual review of ANSI/NIST "
-    "biometric transactions by presenting a reference file alongside candidate files.</p>"
+    "<p>Nist Biometric Viewer supports structured visual review of ANSI/NIST "
+    "biometric transactions by presenting a Reference Record alongside Comparison Records.</p>"
     "<p><b>Scope</b><br>"
     "Visual review only. The application does not perform automated biometric matching, "
     "similarity scoring, identity verification, or decision-making.</p>"
@@ -26,7 +26,7 @@ ABOUT_TEXT = (
 class AboutDialog(QDialog):
     def __init__(self, parent=None) -> None:
         super().__init__(parent)
-        self.setWindowTitle("About NIST Fingerprint Comparator")
+        self.setWindowTitle("About Nist Biometric Viewer")
         self.setMinimumWidth(560)
 
         layout = QVBoxLayout(self)
@@ -44,7 +44,7 @@ class AboutDialog(QDialog):
             )
         )
         title = QLabel(
-            "<span style='font-size:18pt; font-weight:600;'>NIST Fingerprint Comparator</span>"
+            "<span style='font-size:18pt; font-weight:600;'>Nist Biometric Viewer</span>"
             "<br><span style='color:#52606d;'>Professional biometric transaction review</span>"
         )
         title.setTextFormat(Qt.TextFormat.RichText)
