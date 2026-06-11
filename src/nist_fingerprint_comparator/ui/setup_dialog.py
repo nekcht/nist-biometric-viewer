@@ -59,19 +59,6 @@ class ComparisonSetupDialog(QDialog):
         self.phase_stack.addWidget(self._build_source_phase())
         self.phase_stack.addWidget(self._build_reference_phase())
         layout.addWidget(self.phase_stack, 1)
-
-        navigation = QHBoxLayout()
-        self.cancel_button = QPushButton("Cancel")
-        self.cancel_button.setCursor(Qt.CursorShape.PointingHandCursor)
-        self.cancel_button.clicked.connect(self.reject)
-        self.next_button = QPushButton("Next")
-        self.next_button.setCursor(Qt.CursorShape.PointingHandCursor)
-        self.next_button.setDefault(True)
-        self.next_button.clicked.connect(self._go_next)
-        navigation.addStretch(1)
-        navigation.addWidget(self.cancel_button)
-        navigation.addWidget(self.next_button)
-        layout.addLayout(navigation)
         self._show_source_phase()
 
         if initial_paths:
@@ -103,12 +90,24 @@ class ComparisonSetupDialog(QDialog):
         self.add_sources_button.setToolTip("Select comparison records")
         self.add_sources_button.setCursor(Qt.CursorShape.PointingHandCursor)
         self.add_sources_button.clicked.connect(self._choose_sources)
-        clear_sources = QPushButton("Clear")
-        clear_sources.setCursor(Qt.CursorShape.PointingHandCursor)
-        clear_sources.clicked.connect(self._clear_sources)
+        self.clear_sources_button = QPushButton("Clear")
+        self.clear_sources_button.setIcon(
+            self.style().standardIcon(QStyle.StandardPixmap.SP_DialogResetButton)
+        )
+        self.clear_sources_button.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.clear_sources_button.clicked.connect(self._clear_sources)
+        self.next_button = QPushButton("Next")
+        self.next_button.setIcon(
+            self.style().standardIcon(QStyle.StandardPixmap.SP_ArrowForward)
+        )
+        self.next_button.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.next_button.setDefault(True)
+        self.next_button.clicked.connect(self._go_next)
         source_buttons.addWidget(self.add_sources_button)
-        source_buttons.addWidget(clear_sources)
+        source_buttons.addWidget(self.clear_sources_button)
         source_buttons.addStretch(1)
+        source_buttons.addWidget(self.next_button)
+        self.source_buttons_layout = source_buttons
         layout.addLayout(source_buttons)
 
         self.source_status = QLabel("No records selected")
@@ -120,17 +119,38 @@ class ComparisonSetupDialog(QDialog):
     def _build_reference_phase(self) -> QWidget:
         page = QWidget()
         layout = QVBoxLayout(page)
-        title = QLabel("2. Select Reference Record")
-        title.setObjectName("sourceTitle")
-        introduction = QLabel("Other selected records become Comparison Records.")
+        introduction = QLabel(
+            "Select the Reference Record. All other records will be compared against it."
+        )
+        introduction.setObjectName("referenceGuidance")
         introduction.setWordWrap(True)
-        layout.addWidget(title)
         layout.addWidget(introduction)
 
         self.reference_list = ReferenceRecordList()
         self.reference_list.setCursor(Qt.CursorShape.PointingHandCursor)
         self.reference_list.setAccessibleName("Reference Record")
+        self.reference_list.itemSelectionChanged.connect(
+            self._update_reference_navigation
+        )
         layout.addWidget(self.reference_list, 1)
+        reference_navigation = QHBoxLayout()
+        self.reference_back_button = QPushButton("Back")
+        self.reference_back_button.setIcon(
+            self.style().standardIcon(QStyle.StandardPixmap.SP_ArrowBack)
+        )
+        self.reference_back_button.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.reference_back_button.clicked.connect(self._go_back)
+        reference_navigation.addWidget(self.reference_back_button)
+        reference_navigation.addStretch(1)
+        self.reference_next_button = QPushButton("Next")
+        self.reference_next_button.setIcon(
+            self.style().standardIcon(QStyle.StandardPixmap.SP_ArrowForward)
+        )
+        self.reference_next_button.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.reference_next_button.clicked.connect(self._go_next)
+        reference_navigation.addWidget(self.reference_next_button)
+        layout.addLayout(reference_navigation)
+        self._update_reference_navigation()
         return page
 
     @property
@@ -241,6 +261,7 @@ class ComparisonSetupDialog(QDialog):
         previous_reference = reference_path or self.file_a_path
         self.reference_list.set_paths(self._record_paths, previous_reference)
         self.reference_list.setEnabled(bool(self._record_paths))
+        self._update_reference_navigation()
 
     def _refresh_source_list(self) -> None:
         self.source_list.clear()
@@ -278,8 +299,7 @@ class ComparisonSetupDialog(QDialog):
             if self._archive_path is not None:
                 self.accept()
                 return
-            self.phase_stack.setCurrentIndex(1)
-            self.next_button.setText("Next")
+            self._show_reference_phase()
             return
         if self.file_a_path is None:
             QMessageBox.information(
@@ -293,6 +313,21 @@ class ComparisonSetupDialog(QDialog):
     def _show_source_phase(self) -> None:
         self.phase_stack.setCurrentIndex(0)
         self.next_button.setText("Next")
+        self.next_button.setDefault(True)
+        self.reference_next_button.setDefault(False)
+
+    def _show_reference_phase(self) -> None:
+        self.phase_stack.setCurrentIndex(1)
+        self.next_button.setDefault(False)
+        self.reference_next_button.setDefault(True)
+        self._update_reference_navigation()
+
+    def _go_back(self) -> None:
+        self._show_source_phase()
+
+    def _update_reference_navigation(self) -> None:
+        self.reference_next_button.setEnabled(self.file_a_path is not None)
+        self.reference_back_button.setEnabled(True)
 
     def _validate_source_selection(self) -> bool:
         if self._archive_path is not None:

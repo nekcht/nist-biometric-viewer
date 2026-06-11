@@ -13,6 +13,7 @@ from PySide6.QtWidgets import (
     QListWidget,
     QListWidgetItem,
     QMessageBox,
+    QStyle,
     QVBoxLayout,
 )
 
@@ -64,21 +65,28 @@ class ArchiveReferenceDialog(QDialog):
         self.setWindowTitle("Select Reference Record")
         self.resize(680, 480)
         layout = QVBoxLayout(self)
-        guidance = QLabel("Other archive records become Comparison Records.")
+        guidance = QLabel(
+            "Select the Reference Record. All other records will be compared against it."
+        )
+        guidance.setObjectName("referenceGuidance")
         guidance.setWordWrap(True)
         layout.addWidget(guidance)
 
         self.record_list = ReferenceRecordList(paths)
+        self.record_list.itemSelectionChanged.connect(self._update_next_button)
         self.record_list.itemDoubleClicked.connect(lambda _: self._validate_and_accept())
         layout.addWidget(self.record_list, 1)
 
-        buttons = QDialogButtonBox(
-            QDialogButtonBox.StandardButton.Cancel | QDialogButtonBox.StandardButton.Ok
+        buttons = QDialogButtonBox(QDialogButtonBox.StandardButton.Ok)
+        next_button = buttons.button(QDialogButtonBox.StandardButton.Ok)
+        next_button.setText("Next")
+        next_button.setIcon(
+            self.style().standardIcon(QStyle.StandardPixmap.SP_ArrowForward)
         )
-        buttons.button(QDialogButtonBox.StandardButton.Ok).setText("Next")
         buttons.accepted.connect(self._validate_and_accept)
-        buttons.rejected.connect(self.reject)
         layout.addWidget(buttons)
+        self._next_button = next_button
+        self._update_next_button()
 
     @property
     def reference_path(self) -> Path | None:
@@ -97,6 +105,9 @@ class ArchiveReferenceDialog(QDialog):
             )
             return
         self.accept()
+
+    def _update_next_button(self) -> None:
+        self._next_button.setEnabled(self.reference_path is not None)
 
 
 def _common_parent(paths: list[Path]) -> Path | None:

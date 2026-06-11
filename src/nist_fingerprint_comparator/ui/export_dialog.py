@@ -1,4 +1,4 @@
-"""Optional UTC time-range selection for decision-history export."""
+"""Optional configured-timezone range selection for decision-history export."""
 
 from __future__ import annotations
 
@@ -18,27 +18,36 @@ from PySide6.QtWidgets import (
 
 
 class ExportHistoryDialog(QDialog):
-    def __init__(self, parent=None) -> None:
+    def __init__(self, timezone_id: str = "UTC", parent=None) -> None:
         super().__init__(parent)
+        self.timezone_id = timezone_id
+        timezone = QTimeZone(timezone_id.encode())
+        if not timezone.isValid():
+            timezone = QTimeZone.utc()
+            self.timezone_id = "UTC"
         self.setWindowTitle("Export Comparison History")
         layout = QVBoxLayout(self)
-        introduction = QLabel("Export all history or filter by UTC range.")
+        introduction = QLabel(
+            f"Export all history or filter by {self.timezone_id} date/time range."
+        )
         introduction.setWordWrap(True)
         layout.addWidget(introduction)
 
-        self.filter_checkbox = QCheckBox("Filter by UTC date/time range")
+        self.filter_checkbox = QCheckBox(
+            f"Filter by {self.timezone_id} date/time range"
+        )
         self.filter_checkbox.setCursor(Qt.CursorShape.PointingHandCursor)
         self.filter_checkbox.toggled.connect(self._set_range_enabled)
         layout.addWidget(self.filter_checkbox)
 
         form = QFormLayout()
-        now = QDateTime.currentDateTimeUtc()
+        now = QDateTime.currentDateTimeUtc().toTimeZone(timezone)
         self.start_edit = QDateTimeEdit(now.addMonths(-1))
         self.end_edit = QDateTimeEdit(now)
         for edit in (self.start_edit, self.end_edit):
             edit.setCalendarPopup(True)
-            edit.setDisplayFormat("yyyy-MM-dd HH:mm:ss 'UTC'")
-            edit.setTimeZone(QTimeZone.utc())
+            edit.setDisplayFormat("HH:mm dd-MM-yyyy")
+            edit.setTimeZone(timezone)
         form.addRow("From", self.start_edit)
         form.addRow("To", self.end_edit)
         layout.addLayout(form)

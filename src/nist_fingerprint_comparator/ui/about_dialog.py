@@ -12,14 +12,11 @@ from .resources import application_icon_path
 
 ABOUT_TEXT = (
     "<p>Visual review of ANSI/NIST biometric records.</p>"
-    "<p><b>Scope</b><br>"
-    "Visual review only. No automated matching or identity decision.</p>"
     f"<p><b>Version</b><br>{__version__}</p>"
     "<p><b>Developed by</b><br>"
-    "Nektarios Christou<br>"
-    "Hellenic Police</p>"
+    "Nektarios Christou"
     "<p><b>Contact</b><br>"
-    '<a href="mailto:n.christou@police.gr">n.christou@police.gr</a><br>'
+    '<a href="mailto:nekcht@gmail.com">nekcht@gmail.com</a><br>'
     '<a href="https://github.com/nekcht">github.com/nekcht</a></p>'
 )
 
@@ -62,7 +59,3 @@ class AboutDialog(QDialog):
             Qt.TextInteractionFlag.TextBrowserInteraction
         )
         layout.addWidget(self.details_label)
-
-        buttons = QDialogButtonBox(QDialogButtonBox.StandardButton.Close)
-        buttons.rejected.connect(self.reject)
-        layout.addWidget(buttons)

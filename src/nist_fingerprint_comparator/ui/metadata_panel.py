@@ -8,6 +8,7 @@ from typing import Any
 from PySide6.QtWidgets import (
     QAbstractItemView,
     QHeaderView,
+    QSizePolicy,
     QTableWidget,
     QTableWidgetItem,
 )
@@ -23,7 +24,11 @@ class MetadataPanel(QTableWidget):
         self.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
         self.setSelectionMode(QAbstractItemView.SelectionMode.NoSelection)
         self.setAlternatingRowColors(True)
-        self.setMaximumHeight(270)
+        self.setMinimumHeight(180)
+        self.setSizePolicy(
+            QSizePolicy.Policy.Expanding,
+            QSizePolicy.Policy.MinimumExpanding,
+        )
 
     def set_rows(self, rows: Iterable[tuple[str, Any]]) -> None:
         filtered = [(label, _display(value)) for label, value in rows]

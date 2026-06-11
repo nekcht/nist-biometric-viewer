@@ -32,6 +32,11 @@ QLabel#setupTitle, QLabel#loadingTitle {
     font-size: 18pt;
     font-weight: 600;
 }
+QLabel#aboutHeading {
+    color: #27313b;
+    font-size: 16pt;
+    font-weight: 600;
+}
 QLabel#setupText, QLabel#loadingMessage {
     color: #52606d;
     font-size: 11pt;
@@ -64,44 +69,49 @@ QLabel#reviewProgress {
     font-weight: 600;
 }
 QPushButton#matchButton, QPushButton#noMatchButton, QPushButton#passButton {
-    color: #ffffff;
     font-size: 10pt;
     font-weight: 700;
     min-width: 96px;
     padding: 7px 14px;
 }
 QPushButton#matchButton {
-    background: #287a4b;
-    border-color: #20633d;
+    background: #edf7f1;
+    border-color: #82b99a;
+    color: #20633d;
 }
 QPushButton#matchButton:hover {
-    background: #236b42;
+    background: #dcefe4;
 }
 QPushButton#matchButton:checked {
-    border: 3px solid #153f28;
-    padding: 5px 12px;
+    background: #287a4b;
+    border-color: #20633d;
+    color: #ffffff;
 }
 QPushButton#noMatchButton {
-    background: #b33a3a;
-    border-color: #923030;
+    background: #fbefef;
+    border-color: #d49a9a;
+    color: #923030;
 }
 QPushButton#noMatchButton:hover {
-    background: #9e3333;
+    background: #f5dddd;
 }
 QPushButton#noMatchButton:checked {
-    border: 3px solid #5f1f1f;
-    padding: 5px 12px;
+    background: #b33a3a;
+    border-color: #923030;
+    color: #ffffff;
 }
 QPushButton#passButton {
-    background: #69737d;
-    border-color: #59636c;
+    background: #eef0f2;
+    border-color: #a6adb4;
+    color: #59636c;
 }
 QPushButton#passButton:hover {
-    background: #59636c;
+    background: #dfe3e6;
 }
 QPushButton#passButton:checked {
-    border: 3px solid #333a40;
-    padding: 5px 12px;
+    background: #69737d;
+    border-color: #59636c;
+    color: #ffffff;
 }
 QPushButton#matchButton:disabled,
 QPushButton#noMatchButton:disabled,
@@ -160,21 +170,11 @@ QGraphicsView {
     border: 1px solid #d8dde3;
     border-radius: 4px;
 }
-QLabel#cardTitle {
+QLabel#pairTitle {
+    color: #27313b;
     font-size: 12pt;
-    font-weight: 600;
-}
-QFrame#imageToolOverlay {
-    background: rgba(32, 37, 43, 185);
-    border-radius: 5px;
-}
-QToolButton#imageToolButton {
-    background: transparent;
-    border: none;
-    padding: 4px;
-}
-QToolButton#imageToolButton:hover {
-    background: rgba(255, 255, 255, 45);
+    font-weight: 700;
+    padding: 2px 2px 0 2px;
 }
 QListWidget#sourceDropList {
     background: #ffffff;
@@ -186,16 +186,36 @@ QListWidget#pairNavigationList {
     background: #ffffff;
     border: 1px solid #d8dde3;
     border-radius: 4px;
-    padding: 3px;
+    padding: 2px;
 }
 QListWidget#pairNavigationList::item {
     border-bottom: 1px solid #e5e8eb;
-    padding: 6px;
+    padding: 0;
 }
 QListWidget#pairNavigationList::item:selected {
     background: #dce6ef;
-    color: #20252b;
-    font-weight: 600;
+}
+QWidget#navigationPairRow, QLabel#navigationPairName, QLabel#navigationPairDecision {
+    background: transparent;
+}
+QLabel#navigationPairName {
+    color: #34404c;
+}
+QLabel#navigationPairDecision {
+    font-size: 8pt;
+    font-weight: 700;
+}
+QLabel#navigationPairDecision[decision="MATCH"] {
+    color: #287a4b;
+}
+QLabel#navigationPairDecision[decision="NO_MATCH"] {
+    color: #b33a3a;
+}
+QLabel#navigationPairDecision[decision="PASS"] {
+    color: #69737d;
+}
+QLabel#navigationPairDecision[decision="UNDECIDED"] {
+    color: #89939d;
 }
 QLabel#sourceStatus {
     color: #52606d;

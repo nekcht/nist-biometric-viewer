@@ -9,7 +9,6 @@ from PySide6.QtCore import Qt
 from PySide6.QtWidgets import (
     QAbstractItemView,
     QDialog,
-    QDialogButtonBox,
     QHBoxLayout,
     QLabel,
     QMessageBox,
@@ -24,6 +23,14 @@ from nist_fingerprint_comparator.core.review import (
     EXPORT_HEADERS,
     HISTORY_ID_KEY,
 )
+
+HISTORY_DIALOG_HEADERS = {
+    **EXPORT_HEADERS,
+    "file_a_name": "File A",
+    "file_a_reference_number": "File A (MN1)",
+    "file_b_name": "File B",
+    "file_b_reference_number": "File B (MN1)",
+}
 
 
 class DecisionHistoryDialog(QDialog):
@@ -48,7 +55,7 @@ class DecisionHistoryDialog(QDialog):
 
         self.table = QTableWidget(len(rows), len(DISPLAY_HISTORY_COLUMNS))
         self.table.setHorizontalHeaderLabels(
-            [EXPORT_HEADERS[column] for column in DISPLAY_HISTORY_COLUMNS]
+            [HISTORY_DIALOG_HEADERS[column] for column in DISPLAY_HISTORY_COLUMNS]
         )
         self.table.setAlternatingRowColors(True)
         self.table.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
@@ -83,9 +90,6 @@ class DecisionHistoryDialog(QDialog):
         self.delete_history_button.clicked.connect(self._confirm_delete_history)
         button_row.addWidget(self.delete_history_button)
         button_row.addStretch(1)
-        buttons = QDialogButtonBox(QDialogButtonBox.StandardButton.Close)
-        buttons.rejected.connect(self.reject)
-        button_row.addWidget(buttons)
         layout.addLayout(button_row)
         self._update_buttons()
 
@@ -152,3 +156,5 @@ class DecisionHistoryDialog(QDialog):
 
 def _history_count_text(count: int) -> str:
     return f"{count} decision" if count == 1 else f"{count} decisions"
+
+

@@ -109,30 +109,35 @@ and decoding happen on worker threads, so the UI remains responsive. Extracted a
 files are held in a temporary session directory and deleted when the review finishes,
 fails before opening, is replaced, or the application closes.
 
-Each displayed biometric image has its own overlaid icon controls for **Zoom In**,
-**Zoom Out**, and **Fit**. Images can be panned by dragging. Mouse-wheel scrolling does
-not zoom images.
+Each displayed biometric image can be zoomed with **Ctrl + mouse wheel** and panned by
+dragging. Normal wheel and trackpad gestures scroll the comparison page. Double-click an
+image, or use the global **Fit Images** control, to return it to its fitted view.
 
 For each Comparison Record, choose **MATCH**, **NO MATCH**, or **PASS** after visual review. Use
 **PASS** to ignore a comparison without saving it to decision history. **MATCH** and
 **NO MATCH** choices are committed immediately to one internal SQLite history database
 before the next Comparison Record is loaded. `NO MATCH` is stored as `NO_MATCH`.
 
-During an active session, use the left-side **Comparison Pairs** navigation panel or
-**Previous Comparison** to revisit any pair. The selected pair's current decision button is
-highlighted, and selecting another decision replaces its previous result. When every pair
-has a decision, the application asks whether to end the session or stay open for a final
-review. **End Session** stops the remaining queue while keeping decisions already completed. Use
+During an active session, use the left-side **Navigation Panel** or
+**Previous Comparison** to revisit any pair. **Next Comparison** moves to the next pair
+without a decision, wrapping to an earlier pair when needed. Navigation decisions are
+color-coded, the selected pair's current decision button is highlighted, and selecting
+another decision replaces its previous result. When every pair has a decision, the
+session remains open for final review until the user selects **End Session**. If any pairs
+still have no decision, the end-session confirmation reports how many remain. Ending the
+session stops the remaining queue while keeping decisions already completed. Use
 **View Comparison History** to display all records currently held in the internal database.
-The minimal internal record includes the selected-timezone timestamp, its timezone,
-canonical UTC time, decision, filenames, and transaction control numbers.
-After the last decision is recorded, the application clears the completed session and
-returns to the initial New Comparison screen.
+The minimal internal record includes the selected-timezone timestamp in
+`mm:HH DD-MM-YYYY` form, its timezone, canonical UTC time, decision, filenames,
+reference numbers, and the Comparison Record transaction control number.
+After **End Session** is confirmed, the application clears the session and returns to the
+initial New Comparison screen.
 
 Use **View Comparison History > Export History** to export the complete history, or an
-optional UTC date/time range, to a formatted XLSX workbook. History export and permanent
-history deletion are available only inside **View Comparison History**. Deletion requires
-confirmation, and the export dialog defaults to the per-user `exports` folder.
+optional date/time range in the configured settings timezone, to a formatted XLSX workbook.
+History export and permanent history deletion are available only inside
+**View Comparison History**. Deletion requires confirmation, and the export dialog defaults
+to the per-user `exports` folder.
 
 Use **Edit > Settings** to select the timezone recorded and displayed for new history
 entries. Canonical UTC timestamps are retained internally for reliable filtering.

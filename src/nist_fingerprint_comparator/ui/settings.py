@@ -6,7 +6,7 @@ import shutil
 from datetime import UTC, datetime
 from pathlib import Path
 
-from PySide6.QtCore import QDateTime, QSettings, Qt, QTimeZone
+from PySide6.QtCore import QDateTime, QSettings, QTimeZone
 
 from nist_fingerprint_comparator.user_data import (
     ensure_user_data_dirs,
@@ -20,6 +20,7 @@ HISTORY_DATABASE_FILENAME = "decision_history.sqlite3"
 SETTINGS_FILENAME = "settings.ini"
 HISTORY_TIMEZONE_KEY = "history/timezone"
 OFFER_SESSION_EXPORT_KEY = "export/offer_session_results"
+HISTORY_TIMESTAMP_FORMAT = "HH:mm dd-MM-yyyy"
 
 
 class AppSettings:
@@ -69,7 +70,7 @@ class AppSettings:
             utc_datetime = utc_datetime.replace(tzinfo=UTC)
         return (
             utc_datetime.astimezone(UTC).isoformat(),
-            recorded.toString(Qt.DateFormat.ISODateWithMs),
+            recorded.toString(HISTORY_TIMESTAMP_FORMAT),
             timezone_id,
         )
 

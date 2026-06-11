@@ -7,7 +7,7 @@ import sqlite3
 from pathlib import Path
 from tempfile import TemporaryDirectory
 
-from PySide6.QtCore import QSize, Qt, QThread
+from PySide6.QtCore import QSize, Qt, QThread, QTimer
 from PySide6.QtGui import QAction
 from PySide6.QtWidgets import (
     QFileDialog,
@@ -16,10 +16,12 @@ from PySide6.QtWidgets import (
     QHBoxLayout,
     QLabel,
     QListWidget,
+    QListWidgetItem,
     QMainWindow,
     QMessageBox,
     QPlainTextEdit,
     QProgressBar,
+    QSizePolicy,
     QPushButton,
     QScrollArea,
     QSplitter,
@@ -128,9 +130,17 @@ class MainWindow(QMainWindow):
         )
         self.previous_comparison_action.setEnabled(False)
 
+        self.next_comparison_action = self._create_action(
+            "Next Comparison",
+            QStyle.StandardPixmap.SP_ArrowForward,
+            "Go to the next comparison without a decision",
+            self._go_to_next_comparison,
+        )
+        self.next_comparison_action.setEnabled(False)
+
         self.end_session_action = self._create_action(
             "End Session",
-            QStyle.StandardPixmap.SP_DialogCloseButton,
+            QStyle.StandardPixmap.SP_MediaStop,
             "End session",
             self._end_current_session,
         )
@@ -201,6 +211,7 @@ class MainWindow(QMainWindow):
 
         self.edit_menu = self.menuBar().addMenu("&Edit")
         self.edit_menu.addAction(self.previous_comparison_action)
+        self.edit_menu.addAction(self.next_comparison_action)
         self.edit_menu.addSeparator()
         self.edit_menu.addAction(self.reset_zoom_action)
 
@@ -319,13 +330,25 @@ class MainWindow(QMainWindow):
         self.previous_button.setCursor(Qt.CursorShape.PointingHandCursor)
         self.review_progress_label = QLabel("No comparison selected")
         self.review_progress_label.setObjectName("reviewProgress")
-        self.review_progress_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.review_progress_label.setVisible(False)
+        self.review_progress_bar = QProgressBar()
+        self.review_progress_bar.setObjectName("reviewProgressBar")
+        self.review_progress_bar.setTextVisible(False)
+        self.review_progress_bar.setSizePolicy(
+            QSizePolicy.Policy.Expanding,
+            QSizePolicy.Policy.Fixed,
+        )
         self.end_session_button = QToolButton()
         self.end_session_button.setDefaultAction(self.end_session_action)
         self.end_session_button.setToolButtonStyle(Qt.ToolButtonStyle.ToolButtonTextBesideIcon)
         self.end_session_button.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.next_button = QToolButton()
+        self.next_button.setDefaultAction(self.next_comparison_action)
+        self.next_button.setToolButtonStyle(Qt.ToolButtonStyle.ToolButtonTextBesideIcon)
+        self.next_button.setCursor(Qt.CursorShape.PointingHandCursor)
         layout.addWidget(self.previous_button)
-        layout.addWidget(self.review_progress_label, 1)
+        layout.addWidget(self.review_progress_bar, 1)
+        layout.addWidget(self.next_button)
         layout.addWidget(self.end_session_button)
         self.status_navigation_bar = bar
         return bar
@@ -375,12 +398,14 @@ class MainWindow(QMainWindow):
         sidebar_layout.setContentsMargins(10, 10, 10, 10)
         sidebar_layout.setSpacing(8)
 
-        navigation_group = QGroupBox("Comparison Pairs")
+        navigation_group = QGroupBox("Navigation Panel")
         navigation_layout = QVBoxLayout(navigation_group)
         self.pair_navigation_list = QListWidget()
         self.pair_navigation_list.setObjectName("pairNavigationList")
         self.pair_navigation_list.setMinimumHeight(150)
+        self.pair_navigation_list.setUniformItemSizes(True)
         self.pair_navigation_list.currentRowChanged.connect(self._navigate_to_pair)
+        self._pair_navigation_rows: list[tuple[QLabel, QLabel]] = []
         navigation_layout.addWidget(self.pair_navigation_list)
         sidebar_layout.addWidget(navigation_group)
 
@@ -649,6 +674,8 @@ class MainWindow(QMainWindow):
         self.page_stack.setCurrentWidget(self.workspace_page)
         if first_pair_ready:
             self.showMaximized()
+            QTimer.singleShot(0, self._fit_comparison_after_workspace_resize)
+            QTimer.singleShot(100, self._fit_comparison_after_workspace_resize)
         self.reset_zoom_action.setEnabled(True)
         self.metadata_action.setEnabled(True)
         self.statusBar().showMessage(f"Comparison ready | Warnings: {total_warnings}")
@@ -818,7 +845,6 @@ class MainWindow(QMainWindow):
         if previous is not None and previous.decision == decision:
             self._update_decision_highlight()
             return
-        was_complete = self._review_queue.is_complete
         record = None
         try:
             record, previous = self._review_queue.set_decision(decision, self._file_b)
@@ -837,8 +863,10 @@ class MainWindow(QMainWindow):
         self._update_pair_navigation()
         self._update_review_status()
         self._update_decision_highlight()
-        if self._review_queue.is_complete and not was_complete:
-            self._confirm_completed_session()
+        if self._review_queue.is_complete:
+            self.statusBar().showMessage(
+                "All comparison pairs decided | Use End Session when review is complete"
+            )
             return
         if previous is not None:
             self.statusBar().showMessage(f"Decision updated: {decision}")
@@ -852,27 +880,33 @@ class MainWindow(QMainWindow):
             return
         self._select_pair(self._review_queue.current_index - 1)
 
-    def _confirm_completed_session(self) -> None:
-        response = QMessageBox.question(
-            self,
-            "Review complete",
-            "All comparison pairs have a decision. End the session now? "
-            "Select No to stay and review your decisions.",
-            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
-            QMessageBox.StandardButton.No,
-        )
-        if response == QMessageBox.StandardButton.Yes:
-            self._finish_review()
+    def _go_to_next_comparison(self) -> None:
+        if not self._candidate_ready:
             return
-        self.statusBar().showMessage("All comparison pairs decided | Session remains open")
+        next_index = self._review_queue.next_undecided_index(
+            self._review_queue.current_index
+        )
+        if next_index is not None:
+            self._select_pair(next_index)
 
     def _end_current_session(self) -> None:
         if not self._candidate_ready:
             return
+        undecided_count = self._review_queue.candidate_total - len(
+            self._review_queue.decisions
+        )
+        if undecided_count:
+            pair_word = "pair has" if undecided_count == 1 else "pairs have"
+            message = (
+                f"{undecided_count} comparison {pair_word} no decision. "
+                "End the session anyway? Completed decisions remain in History."
+            )
+        else:
+            message = "End the current session? Completed decisions remain in History."
         response = QMessageBox.question(
             self,
             "End session",
-            "End the current session? Completed decisions remain in History.",
+            message,
             QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.Cancel,
             QMessageBox.StandardButton.Cancel,
         )
@@ -884,15 +918,6 @@ class MainWindow(QMainWindow):
         completed_decisions = self._completed_session_decisions()
         self._reset_to_initial_screen()
         self.statusBar().showMessage(f"Session ended | Decisions saved: {decision_count}")
-        self._offer_session_export(completed_decisions)
-
-    def _finish_review(self) -> None:
-        decision_count = sum(
-            decision.history_id is not None for decision in self._review_queue.decisions
-        )
-        completed_decisions = self._completed_session_decisions()
-        self._reset_to_initial_screen()
-        self.statusBar().showMessage(f"Review complete | Decisions saved: {decision_count}")
         self._offer_session_export(completed_decisions)
 
     def _completed_session_decisions(self) -> list[ReviewDecision]:
@@ -954,6 +979,8 @@ class MainWindow(QMainWindow):
         self._clear_file_sidebar(self.file_a_widgets)
         self._clear_file_sidebar(self.file_b_widgets)
         self.review_progress_label.setText("No comparison selected")
+        self.review_progress_bar.setRange(0, 1)
+        self.review_progress_bar.setValue(0)
         self.reset_zoom_action.setEnabled(False)
         self.metadata_action.setEnabled(False)
         self.page_stack.setCurrentWidget(self.setup_page)
@@ -977,19 +1004,15 @@ class MainWindow(QMainWindow):
         current = self._review_queue.current_path
         if current is None:
             self.review_progress_label.setText("No comparison selected")
+            self.review_progress_bar.setRange(0, 1)
+            self.review_progress_bar.setValue(0)
             return
-        position = self._review_queue.candidate_number
-        decision = self._review_queue.decision_for_index(
-            self._review_queue.current_index
+        decided = sum(
+            1 for decision in self._review_queue.decisions if decision.history_id is not None
         )
-        decision_text = (
-            f" | Decision: {decision.decision.replace('_', ' ')}"
-            if decision is not None
-            else ""
-        )
-        self.review_progress_label.setText(
-            f"Comparison {position} of {total}: {current.name}{decision_text}"
-        )
+        self.review_progress_label.setText(current.name)
+        self.review_progress_bar.setRange(0, total)
+        self.review_progress_bar.setValue(min(decided, total))
 
     def _set_decision_buttons_enabled(self, enabled: bool) -> None:
         self.match_button.setEnabled(enabled)
@@ -1001,13 +1024,39 @@ class MainWindow(QMainWindow):
         previous_enabled = enabled and self._review_queue.current_index > 0
         self.previous_button.setEnabled(previous_enabled)
         self.previous_comparison_action.setEnabled(previous_enabled)
+        next_enabled = enabled and self._review_queue.next_undecided_index(
+            self._review_queue.current_index
+        ) is not None
+        self.next_button.setEnabled(next_enabled)
+        self.next_comparison_action.setEnabled(next_enabled)
         self._update_decision_highlight()
 
     def _populate_pair_navigation(self) -> None:
         self.pair_navigation_list.blockSignals(True)
         self.pair_navigation_list.clear()
-        for path in self._review_queue.candidate_paths:
-            self.pair_navigation_list.addItem(path.name)
+        self._pair_navigation_rows.clear()
+        for _ in self._review_queue.candidate_paths:
+            item = QListWidgetItem()
+            item.setSizeHint(QSize(0, 28))
+            self.pair_navigation_list.addItem(item)
+
+            row = QWidget()
+            row.setObjectName("navigationPairRow")
+            row.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents)
+            row_layout = QHBoxLayout(row)
+            row_layout.setContentsMargins(5, 0, 5, 0)
+            row_layout.setSpacing(6)
+            name_label = QLabel()
+            name_label.setObjectName("navigationPairName")
+            status_label = QLabel()
+            status_label.setObjectName("navigationPairDecision")
+            status_label.setAlignment(
+                Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter
+            )
+            row_layout.addWidget(name_label, 1)
+            row_layout.addWidget(status_label)
+            self.pair_navigation_list.setItemWidget(item, row)
+            self._pair_navigation_rows.append((name_label, status_label))
         self.pair_navigation_list.blockSignals(False)
         self._update_pair_navigation()
 
@@ -1023,12 +1072,30 @@ class MainWindow(QMainWindow):
                 if decision is not None
                 else "Not decided"
             )
-            item.setText(f"{index + 1}. {path.name}\n{status}")
+            item.setData(
+                Qt.ItemDataRole.AccessibleTextRole,
+                f"{index + 1}. {path.name} | {status}",
+            )
             item.setToolTip(str(path))
+            if index < len(self._pair_navigation_rows):
+                name_label, status_label = self._pair_navigation_rows[index]
+                name_label.setText(f"{index + 1}. {path.name}")
+                status_label.setText(status)
+                status_label.setProperty(
+                    "decision",
+                    decision.decision if decision is not None else "UNDECIDED",
+                )
+                status_label.style().unpolish(status_label)
+                status_label.style().polish(status_label)
         current_index = self._review_queue.current_index
         if 0 <= current_index < self.pair_navigation_list.count():
             self.pair_navigation_list.setCurrentRow(current_index)
         self.pair_navigation_list.blockSignals(False)
+        next_enabled = self._candidate_ready and self._review_queue.next_undecided_index(
+            current_index
+        ) is not None
+        self.next_button.setEnabled(next_enabled)
+        self.next_comparison_action.setEnabled(next_enabled)
         self._update_decision_highlight()
 
     def _update_decision_highlight(self) -> None:
@@ -1105,6 +1172,15 @@ class MainWindow(QMainWindow):
     def _reset_zoom(self) -> None:
         self.comparison_grid.reset_zoom()
 
+    def _fit_comparison_after_workspace_resize(self) -> None:
+        if self.page_stack.currentWidget() is not self.workspace_page:
+            return
+        workspace_layout = self.fingerprint_workspace.layout()
+        if workspace_layout is not None:
+            workspace_layout.activate()
+        self.comparison_grid.updateGeometry()
+        self.comparison_grid.fit_after_resize()
+
     def _toggle_metadata(self, visible: bool) -> None:
         self.comparison_grid.set_metadata_visible(visible)
         self.statusBar().showMessage(
@@ -1112,7 +1188,7 @@ class MainWindow(QMainWindow):
         )
 
     def _export_history(self) -> None:
-        dialog = ExportHistoryDialog(self)
+        dialog = ExportHistoryDialog(self._settings.history_timezone_id(), self)
         if not dialog.exec():
             return
         start_utc, end_utc = dialog.selected_range_utc()

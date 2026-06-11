@@ -12,6 +12,7 @@ from typing import Literal
 from openpyxl import Workbook
 from openpyxl.styles import Font, PatternFill
 from openpyxl.utils import get_column_letter
+from PySide6.QtCore import QDateTime, Qt, QTimeZone
 
 from .models import NistTransaction
 
@@ -24,11 +25,9 @@ HISTORY_COLUMNS = [
     "timezone",
     "decision",
     "file_a_name",
-    "file_a_reference_number",
-    "file_a_transaction_control_number",
     "file_b_name",
+    "file_a_reference_number",
     "file_b_reference_number",
-    "file_b_transaction_control_number",
 ]
 
 DISPLAY_HISTORY_COLUMNS = [column for column in HISTORY_COLUMNS if column != "timestamp_utc"]
@@ -39,11 +38,9 @@ EXPORT_HEADERS = {
     "timezone": "Time Zone",
     "decision": "Decision",
     "file_a_name": "Reference Record Name",
-    "file_a_reference_number": "Reference Record Reference Number (MN1)",
-    "file_a_transaction_control_number": "Reference Record Transaction Control Number",
     "file_b_name": "Comparison Record Name",
+    "file_a_reference_number": "Reference Record Reference Number (MN1)",
     "file_b_reference_number": "Comparison Record Reference Number (MN1)",
-    "file_b_transaction_control_number": "Comparison Record Transaction Control Number",
 }
 
 
@@ -258,13 +255,7 @@ class DecisionHistoryStore:
                 f"{where} ORDER BY timestamp_utc, id",
                 parameters,
             ).fetchall()
-        return [
-            {
-                HISTORY_ID_KEY: str(row[0]),
-                **dict(zip(HISTORY_COLUMNS, row[1:], strict=True)),
-            }
-            for row in rows
-        ]
+        return [_history_row(row) for row in rows]
 
     def count(self) -> int:
         with closing(self._connect()) as connection:
@@ -282,6 +273,7 @@ class DecisionHistoryStore:
             ):
                 self._migrate_history_schema(connection)
             connection.execute(_CREATE_HISTORY_TABLE_SQL)
+            self._normalize_history_timestamps(connection)
 
     @staticmethod
     def _history_schema_requires_migration(
@@ -320,6 +312,21 @@ class DecisionHistoryStore:
             "WHERE decision IN ('MATCH', 'NO_MATCH')"
         )
         connection.execute("DROP TABLE decisions_before_migration")
+
+    @staticmethod
+    def _normalize_history_timestamps(connection: sqlite3.Connection) -> None:
+        rows = connection.execute(
+            "SELECT id, timestamp_utc, timestamp, timezone FROM decisions"
+        ).fetchall()
+        updates = [
+            (formatted, history_id)
+            for history_id, timestamp_utc, timestamp, timezone in rows
+            if (formatted := _formatted_timestamp(timestamp_utc, timezone)) != timestamp
+        ]
+        connection.executemany(
+            "UPDATE decisions SET timestamp = ? WHERE id = ?",
+            updates,
+        )
 
     def _connect(self) -> sqlite3.Connection:
         return sqlite3.connect(self.path)
@@ -367,7 +374,7 @@ def available_export_path(path: Path) -> Path:
 def decision_record(decision: ReviewDecision) -> dict[str, str]:
     row = {
         "timestamp_utc": decision.timestamp_utc,
-        "timestamp": decision.timestamp,
+        "timestamp": _formatted_timestamp(decision.timestamp_utc, decision.timezone),
         "timezone": decision.timezone,
         "decision": decision.decision,
     }
@@ -377,17 +384,41 @@ def decision_record(decision: ReviewDecision) -> dict[str, str]:
 
 
 def _transaction_fields(prefix: str, transaction: NistTransaction) -> dict[str, str]:
-    return {
+    fields = {
         f"{prefix}_name": transaction.source_path.name,
         f"{prefix}_reference_number": transaction.reference_number,
-        f"{prefix}_transaction_control_number": transaction.transaction_metadata.get("1.009", ""),
     }
+    return fields
 
 
 def _utc_iso(value: datetime) -> str:
     if value.tzinfo is None:
         value = value.replace(tzinfo=UTC)
     return value.astimezone(UTC).isoformat()
+
+
+def _history_row(row: tuple) -> dict[str, str]:
+    result = {
+        HISTORY_ID_KEY: str(row[0]),
+        **dict(zip(HISTORY_COLUMNS, row[1:], strict=True)),
+    }
+    result["timestamp"] = _formatted_timestamp(
+        result["timestamp_utc"],
+        result["timezone"],
+    )
+    return result
+
+
+def _formatted_timestamp(timestamp_utc: str, timezone_id: str) -> str:
+    timestamp = QDateTime.fromString(timestamp_utc, Qt.DateFormat.ISODateWithMs)
+    if not timestamp.isValid():
+        timestamp = QDateTime.fromString(timestamp_utc, Qt.DateFormat.ISODate)
+    timezone = QTimeZone(timezone_id.encode())
+    if not timezone.isValid():
+        timezone = QTimeZone.utc()
+    if not timestamp.isValid():
+        return timestamp_utc
+    return timestamp.toTimeZone(timezone).toString("HH:mm dd-MM-yyyy")
 
 
 _CREATE_HISTORY_TABLE_SQL = """
@@ -398,10 +429,8 @@ CREATE TABLE IF NOT EXISTS decisions (
     timezone TEXT NOT NULL,
     decision TEXT NOT NULL CHECK(decision IN ('MATCH', 'NO_MATCH')),
     file_a_name TEXT NOT NULL,
-    file_a_reference_number TEXT NOT NULL,
-    file_a_transaction_control_number TEXT NOT NULL,
     file_b_name TEXT NOT NULL,
-    file_b_reference_number TEXT NOT NULL,
-    file_b_transaction_control_number TEXT NOT NULL
+    file_a_reference_number TEXT NOT NULL,
+    file_b_reference_number TEXT NOT NULL
 )
 """

@@ -63,9 +63,16 @@ class ComparisonGrid(QScrollArea):
                 warning.setWordWrap(True)
                 self._layout.addWidget(warning)
             row = QWidget()
-            row_layout = QHBoxLayout(row)
+            row_layout = QVBoxLayout(row)
             row_layout.setContentsMargins(0, 0, 0, 0)
-            row_layout.setSpacing(12)
+            row_layout.setSpacing(8)
+            pair_title = QLabel(_pair_title(slot.finger_name))
+            pair_title.setObjectName("pairTitle")
+            row_layout.addWidget(pair_title)
+            cards = QWidget()
+            cards_layout = QHBoxLayout(cards)
+            cards_layout.setContentsMargins(0, 0, 0, 0)
+            cards_layout.setSpacing(12)
             file_a = FingerprintCard(
                 slot.finger_name,
                 slot.file_a_image,
@@ -74,8 +81,9 @@ class ComparisonGrid(QScrollArea):
                 slot.finger_name,
                 slot.file_b_image,
             )
-            row_layout.addWidget(file_a, 1)
-            row_layout.addWidget(file_b, 1)
+            cards_layout.addWidget(file_a, 1)
+            cards_layout.addWidget(file_b, 1)
+            row_layout.addWidget(cards)
             self._layout.addWidget(row)
             self._cards.extend([file_a, file_b])
         self._layout.addStretch(1)
@@ -84,6 +92,16 @@ class ComparisonGrid(QScrollArea):
     def reset_zoom(self) -> None:
         for card in self._cards:
             card.viewer.reset_zoom()
+
+    def fit_after_resize(self) -> None:
+        self._layout.activate()
+        self._container.updateGeometry()
+        for card in self._cards:
+            card_layout = card.layout()
+            if card_layout is not None:
+                card_layout.activate()
+            card.updateGeometry()
+        self.reset_zoom()
 
     def set_metadata_visible(self, visible: bool) -> None:
         for card in self._cards:
@@ -132,8 +150,11 @@ class ComparisonGrid(QScrollArea):
     def _position_headers(self) -> None:
         if self._header_container.isHidden():
             return
-        viewport = self.viewport()
         header_height = self._header_container.sizeHint().height()
+        top_margin = header_height + 8
+        if self.viewportMargins().top() != top_margin:
+            self.setViewportMargins(0, top_margin, 0, 0)
+        viewport = self.viewport()
         self._header_container.setGeometry(
             viewport.x(),
             self.frameWidth(),
@@ -177,3 +198,9 @@ class ComparisonGrid(QScrollArea):
         layout.addWidget(reference_number_label)
         layout.addWidget(summary_label)
         return header
+
+
+def _pair_title(finger_name: str | None) -> str:
+    if not finger_name or finger_name.casefold() in {"unknown", "unmapped"}:
+        return "Unmapped Impression"
+    return finger_name

@@ -121,7 +121,9 @@ def test_internal_history_query_filters_utc_time_range(tmp_path: Path) -> None:
         datetime(2026, 6, 10, 23, 59, tzinfo=UTC),
     )
 
-    assert [row["file_a_transaction_control_number"] for row in rows] == ["A-2"]
+    assert [row["file_b_reference_number"] for row in rows] == ["MN1-B-2"]
+    assert rows[0]["timestamp"] == "12:00 10-06-2026"
+    assert "file_a_transaction_control_number" not in rows[0]
     assert rows[0]["file_a_reference_number"] == "MN1-A-2"
     assert rows[0]["file_b_reference_number"] == "MN1-B-2"
 
@@ -136,7 +138,7 @@ def test_internal_history_can_delete_exact_session_decision(tmp_path: Path) -> N
     store.delete(second)
 
     assert store.count() == 1
-    assert store.query()[0]["file_a_transaction_control_number"] == "A-1"
+    assert store.query()[0]["file_b_reference_number"] == "MN1-B-1"
     assert second.history_id is None
 
 
@@ -228,12 +230,26 @@ def test_existing_history_database_removes_sha_columns_and_pass_rows(tmp_path: P
 
     with sqlite3.connect(database) as connection:
         columns = [row[1] for row in connection.execute("PRAGMA table_info(decisions)")]
+        saved_timestamps = connection.execute(
+            "SELECT timestamp FROM decisions ORDER BY id"
+        ).fetchall()
 
     assert columns == ["id", *HISTORY_COLUMNS]
+    assert saved_timestamps == [("08:00 10-06-2026",), ("10:00 10-06-2026",)]
     assert [row["decision"] for row in store.query()] == ["MATCH", "NO_MATCH"]
     assert store.query()[0]["file_a_reference_number"] == ""
     assert store.query()[0]["file_b_reference_number"] == ""
     assert all("sha256" not in column for column in HISTORY_COLUMNS)
+    assert HISTORY_COLUMNS == [
+        "timestamp_utc",
+        "timestamp",
+        "timezone",
+        "decision",
+        "file_a_name",
+        "file_b_name",
+        "file_a_reference_number",
+        "file_b_reference_number",
+    ]
 
 
 def test_xlsx_export_contains_minimal_history_columns(tmp_path: Path) -> None:
@@ -247,15 +263,17 @@ def test_xlsx_export_contains_minimal_history_columns(tmp_path: Path) -> None:
     assert len(rows) == 2
     assert len(rows[0]) == len(DISPLAY_HISTORY_COLUMNS)
     assert rows[1][2] == "NO_MATCH"
-    assert rows[1][4] == "MN1-A-1"
-    assert rows[1][5] == "A-1"
-    assert rows[1][7] == "MN1-B-1"
-    assert rows[1][8] == "B-1"
+    assert rows[1][3] == "a-1.nist"
+    assert rows[1][4] == "b-1.nist"
+    assert rows[1][5] == "MN1-A-1"
+    assert rows[1][6] == "MN1-B-1"
+    assert rows[1][0] == "12:00 10-06-2026"
     assert all("SHA-256" not in str(header) for header in rows[0])
     assert "Reference Record Name" in rows[0]
     assert "Reference Record Reference Number (MN1)" in rows[0]
     assert "Comparison Record Name" in rows[0]
     assert "Comparison Record Reference Number (MN1)" in rows[0]
+    assert "Comparison Record Transaction Control Number" not in rows[0]
 
 
 def test_available_export_path_uses_first_free_numbered_name(tmp_path: Path) -> None:

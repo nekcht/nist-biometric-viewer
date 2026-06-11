@@ -1,3 +1,4 @@
+import re
 from pathlib import Path
 
 from PySide6.QtCore import QSettings
@@ -119,5 +120,5 @@ def test_history_timezone_is_persisted_and_used_for_recorded_timestamp(tmp_path:
 
     assert settings.history_timezone_id() == "UTC"
     assert timezone_id == "UTC"
-    assert timestamp.startswith(timestamp_utc[:19])
+    assert re.fullmatch(r"\d{2}:\d{2} \d{2}-\d{2}-\d{4}", timestamp)
     assert timestamp_utc.endswith("+00:00")
