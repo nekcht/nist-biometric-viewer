@@ -77,6 +77,10 @@ QPushButton#matchButton {
 QPushButton#matchButton:hover {
     background: #236b42;
 }
+QPushButton#matchButton:checked {
+    border: 3px solid #153f28;
+    padding: 5px 12px;
+}
 QPushButton#noMatchButton {
     background: #b33a3a;
     border-color: #923030;
@@ -84,12 +88,20 @@ QPushButton#noMatchButton {
 QPushButton#noMatchButton:hover {
     background: #9e3333;
 }
+QPushButton#noMatchButton:checked {
+    border: 3px solid #5f1f1f;
+    padding: 5px 12px;
+}
 QPushButton#passButton {
     background: #69737d;
     border-color: #59636c;
 }
 QPushButton#passButton:hover {
     background: #59636c;
+}
+QPushButton#passButton:checked {
+    border: 3px solid #333a40;
+    padding: 5px 12px;
 }
 QPushButton#matchButton:disabled,
 QPushButton#noMatchButton:disabled,
@@ -169,6 +181,21 @@ QListWidget#sourceDropList {
     border: 1px dashed #9ba8b5;
     border-radius: 6px;
     padding: 6px;
+}
+QListWidget#pairNavigationList {
+    background: #ffffff;
+    border: 1px solid #d8dde3;
+    border-radius: 4px;
+    padding: 3px;
+}
+QListWidget#pairNavigationList::item {
+    border-bottom: 1px solid #e5e8eb;
+    padding: 6px;
+}
+QListWidget#pairNavigationList::item:selected {
+    background: #dce6ef;
+    color: #20252b;
+    font-weight: 600;
 }
 QLabel#sourceStatus {
     color: #52606d;

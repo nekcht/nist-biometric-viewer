@@ -91,15 +91,42 @@ class ReviewQueue:
 
     @property
     def is_complete(self) -> bool:
-        return bool(self.candidate_paths) and self.current_index >= len(self.candidate_paths)
+        return bool(self.candidate_paths) and len(self.decisions) == len(
+            self.candidate_paths
+        )
 
-    def record(
+    def set_current_index(self, index: int) -> None:
+        if not 0 <= index < len(self.candidate_paths):
+            raise IndexError("Comparison Record index is out of range.")
+        self.current_index = index
+
+    def decision_for_index(self, index: int) -> ReviewDecision | None:
+        candidate_number = index + 1
+        return next(
+            (
+                decision
+                for decision in self.decisions
+                if decision.candidate_number == candidate_number
+            ),
+            None,
+        )
+
+    def next_undecided_index(self, after_index: int) -> int | None:
+        decided = {decision.candidate_number - 1 for decision in self.decisions}
+        ordered_indexes = [
+            *range(after_index + 1, len(self.candidate_paths)),
+            *range(0, after_index),
+        ]
+        return next((index for index in ordered_indexes if index not in decided), None)
+
+    def set_decision(
         self,
         decision: ReviewDecisionValue,
         file_b: NistTransaction,
-    ) -> ReviewDecision:
+    ) -> tuple[ReviewDecision, ReviewDecision | None]:
         if self.file_a is None or self.current_path is None:
             raise ValueError("No Comparison Record selected.")
+        previous = self.decision_for_index(self.current_index)
         review_decision = ReviewDecision(
             decision=decision,
             candidate_number=self.current_index + 1,
@@ -107,7 +134,30 @@ class ReviewQueue:
             file_a=self.file_a,
             file_b=file_b,
         )
+        if previous is not None:
+            self.decisions.remove(previous)
         self.decisions.append(review_decision)
+        self.decisions.sort(key=lambda item: item.candidate_number)
+        return review_decision, previous
+
+    def restore_decision(
+        self,
+        candidate_index: int,
+        previous: ReviewDecision | None,
+    ) -> None:
+        current = self.decision_for_index(candidate_index)
+        if current is not None:
+            self.decisions.remove(current)
+        if previous is not None:
+            self.decisions.append(previous)
+            self.decisions.sort(key=lambda item: item.candidate_number)
+
+    def record(
+        self,
+        decision: ReviewDecisionValue,
+        file_b: NistTransaction,
+    ) -> ReviewDecision:
+        review_decision, _ = self.set_decision(decision, file_b)
         self.current_index += 1
         return review_decision
 
@@ -146,6 +196,35 @@ class DecisionHistoryStore:
             raise ValueError("Decision is not in History.")
         self.delete_by_id(decision.history_id)
         decision.history_id = None
+
+    def replace(
+        self,
+        previous: ReviewDecision | None,
+        decision: ReviewDecision,
+    ) -> int | None:
+        """Atomically replace one active-session history record."""
+        row = decision_record(decision)
+        placeholders = ", ".join("?" for _ in HISTORY_COLUMNS)
+        columns = ", ".join(HISTORY_COLUMNS)
+        with closing(self._connect()) as connection, connection:
+            if previous is not None and previous.history_id is not None:
+                cursor = connection.execute(
+                    "DELETE FROM decisions WHERE id = ?",
+                    (previous.history_id,),
+                )
+                if cursor.rowcount != 1:
+                    raise ValueError("History record not found.")
+            history_id = None
+            if decision.decision != "PASS":
+                cursor = connection.execute(
+                    f"INSERT INTO decisions ({columns}) VALUES ({placeholders})",
+                    [row[column] for column in HISTORY_COLUMNS],
+                )
+                history_id = int(cursor.lastrowid)
+        if previous is not None:
+            previous.history_id = None
+        decision.history_id = history_id
+        return history_id
 
     def delete_by_id(self, history_id: int) -> None:
         with closing(self._connect()) as connection, connection:

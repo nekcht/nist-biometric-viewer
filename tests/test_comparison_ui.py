@@ -111,7 +111,7 @@ def test_ui_renders_every_impression_as_a_cross_file_row() -> None:
     application.processEvents()
 
 
-def test_main_window_records_final_queue_decision(tmp_path) -> None:
+def test_main_window_records_final_queue_decision(tmp_path, monkeypatch) -> None:
     application = QApplication.instance() or QApplication([])
     file_a_path = tmp_path / "a.nist"
     file_b_path = tmp_path / "b.nist"
@@ -124,6 +124,11 @@ def test_main_window_records_final_queue_decision(tmp_path) -> None:
     window._file_b = file_b
     window._review_queue.start(file_a, [file_b_path])
     window._settings.set_offer_session_export(False)
+    monkeypatch.setattr(
+        QMessageBox,
+        "question",
+        lambda *args: QMessageBox.StandardButton.Yes,
+    )
 
     window._record_decision("NO_MATCH")
 
@@ -172,7 +177,7 @@ def test_main_window_advances_to_next_candidate_after_decision(tmp_path) -> None
     application.processEvents()
 
 
-def test_main_window_pass_advances_without_saving_history(tmp_path) -> None:
+def test_main_window_pass_advances_without_saving_history(tmp_path, monkeypatch) -> None:
     application = QApplication.instance() or QApplication([])
     file_a_path = tmp_path / "a.nist"
     file_b_path = tmp_path / "b.nist"
@@ -184,6 +189,11 @@ def test_main_window_pass_advances_without_saving_history(tmp_path) -> None:
     window._file_a = file_a
     window._file_b = file_b
     window._review_queue.start(file_a, [file_b_path])
+    monkeypatch.setattr(
+        QMessageBox,
+        "question",
+        lambda *args: QMessageBox.StandardButton.Yes,
+    )
 
     window._record_decision("PASS")
 
@@ -270,6 +280,9 @@ def test_main_window_has_professional_menus_without_toolbars(tmp_path) -> None:
         window.match_button
     )
     assert not any(group.title() == "Review queue" for group in window.findChildren(QGroupBox))
+    assert any(
+        group.title() == "Comparison Pairs" for group in window.findChildren(QGroupBox)
+    )
     assert window.file_a_widgets["metadata"].isHidden()
     assert window.file_b_widgets["metadata"].isHidden()
     assert "#69737d" in APP_STYLESHEET
@@ -394,6 +407,28 @@ def test_new_comparison_pair_resets_grid_scroll_to_top() -> None:
     grid.set_session(session)
 
     assert grid.verticalScrollBar().value() == 0
+    grid.close()
+    application.processEvents()
+
+
+def test_record_headers_remain_outside_the_fingerprint_scroll_content() -> None:
+    application = QApplication.instance() or QApplication([])
+    session = build_cross_file_comparison([_image("1")], [_image("1")])
+    grid = ComparisonGrid()
+
+    grid.set_session(session)
+
+    headers = grid.findChildren(QLabel, "recordHeaderTitle")
+    assert [header.text() for header in headers] == [
+        "Reference Record",
+        "Comparison Record",
+    ]
+    assert all(
+        header.parentWidget().parentWidget() is grid._header_container
+        for header in headers
+    )
+    assert not grid._header_container.isHidden()
+    assert grid.viewport().y() > grid._header_container.y()
     grid.close()
     application.processEvents()
 
@@ -692,10 +727,7 @@ def test_archive_selection_loads_extracted_files_then_cleans_temporary_directory
     application.processEvents()
 
 
-def test_previous_comparison_erases_last_record_and_reloads_candidate(
-    tmp_path,
-    monkeypatch,
-) -> None:
+def test_previous_comparison_navigates_without_erasing_decision(tmp_path) -> None:
     application = QApplication.instance() or QApplication([])
     file_a_path = tmp_path / "a.nist"
     file_b1_path = tmp_path / "b1.nist"
@@ -714,18 +746,82 @@ def test_previous_comparison_erases_last_record_and_reloads_candidate(
     window._set_decision_buttons_enabled(True)
     requested: list[tuple[Path, str]] = []
     window._start_processing = lambda path, target: requested.append((path, target))
-    monkeypatch.setattr(
-        QMessageBox,
-        "warning",
-        lambda *args: QMessageBox.StandardButton.Yes,
-    )
-
     window._go_to_previous_comparison()
 
-    assert window._history_store.count() == 0
-    assert window._review_queue.decisions == []
+    assert window._history_store.count() == 1
+    assert window._review_queue.decisions == [decision]
     assert window._review_queue.current_path == file_b1_path
     assert requested == [(file_b1_path, "b")]
+    window.close()
+    application.processEvents()
+
+
+def test_pair_navigation_shows_and_allows_changing_decisions(tmp_path) -> None:
+    application = QApplication.instance() or QApplication([])
+    file_a = NistTransaction(source_path=tmp_path / "a.nist")
+    file_b1 = NistTransaction(source_path=tmp_path / "b1.nist")
+    file_b2 = NistTransaction(source_path=tmp_path / "b2.nist")
+    window = _window(tmp_path)
+    window._file_a = file_a
+    window._review_queue.start(file_a, [file_b1.source_path, file_b2.source_path])
+    window._candidate_transactions = {
+        file_b1.source_path: file_b1,
+        file_b2.source_path: file_b2,
+    }
+    window._populate_pair_navigation()
+    window._activate_candidate(file_b1)
+
+    window._record_decision("MATCH")
+
+    assert window._review_queue.current_path == file_b2.source_path
+    assert "MATCH" in window.pair_navigation_list.item(0).text()
+    assert not window.match_button.isChecked()
+
+    window.pair_navigation_list.setCurrentRow(0)
+    assert window._file_b is file_b1
+    assert window.match_button.isChecked()
+
+    window._record_decision("NO_MATCH")
+
+    assert window._history_store.count() == 1
+    assert window._history_store.query()[0]["decision"] == "NO_MATCH"
+    assert window.no_match_button.isChecked()
+    assert not window.match_button.isChecked()
+    assert "NO MATCH" in window.pair_navigation_list.item(0).text()
+    window.close()
+    application.processEvents()
+
+
+def test_all_decisions_prompt_can_keep_session_open(tmp_path, monkeypatch) -> None:
+    application = QApplication.instance() or QApplication([])
+    file_a = NistTransaction(source_path=tmp_path / "a.nist")
+    file_b = NistTransaction(source_path=tmp_path / "b.nist")
+    window = _window(tmp_path)
+    window._file_a = file_a
+    window._file_b = file_b
+    window._review_queue.start(file_a, [file_b.source_path])
+    prompts: list[tuple[str, str]] = []
+    monkeypatch.setattr(
+        QMessageBox,
+        "question",
+        lambda *args: prompts.append((args[1], args[2]))
+        or QMessageBox.StandardButton.No,
+    )
+
+    window._record_decision("MATCH")
+
+    assert prompts == [
+        (
+            "Review complete",
+            "All comparison pairs have a decision. End the session now? "
+            "Select No to stay and review your decisions.",
+        )
+    ]
+    assert window._review_queue.is_complete
+    assert window._file_a is file_a
+    assert window._file_b is file_b
+    assert window.match_button.isChecked()
+    assert "Session remains open" in window.statusBar().currentMessage()
     window.close()
     application.processEvents()
 

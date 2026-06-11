@@ -14,6 +14,7 @@ from PySide6.QtWidgets import (
     QGroupBox,
     QHBoxLayout,
     QLabel,
+    QListWidget,
     QMainWindow,
     QMessageBox,
     QPlainTextEdit,
@@ -84,6 +85,7 @@ class MainWindow(QMainWindow):
         )
         self._xlsx_exporter = DecisionXlsxExporter()
         self._pending_candidate_paths: list[Path] = []
+        self._candidate_transactions: dict[Path, NistTransaction] = {}
         self._archive_temp_directory: TemporaryDirectory | None = None
         self._archive_contents_after_thread: ArchiveContents | None = None
         self._first_pair_ready = False
@@ -340,14 +342,17 @@ class MainWindow(QMainWindow):
         layout.setContentsMargins(10, 6, 10, 6)
         self.match_button = QPushButton("MATCH")
         self.match_button.setObjectName("matchButton")
+        self.match_button.setCheckable(True)
         self.match_button.setCursor(Qt.CursorShape.PointingHandCursor)
         self.match_button.clicked.connect(lambda: self._record_decision("MATCH"))
         self.no_match_button = QPushButton("NO MATCH")
         self.no_match_button.setObjectName("noMatchButton")
+        self.no_match_button.setCheckable(True)
         self.no_match_button.setCursor(Qt.CursorShape.PointingHandCursor)
         self.no_match_button.clicked.connect(lambda: self._record_decision("NO_MATCH"))
         self.pass_button = QPushButton("PASS")
         self.pass_button.setObjectName("passButton")
+        self.pass_button.setCheckable(True)
         self.pass_button.setCursor(Qt.CursorShape.PointingHandCursor)
         self.pass_button.clicked.connect(lambda: self._record_decision("PASS"))
         layout.addStretch(1)
@@ -358,9 +363,23 @@ class MainWindow(QMainWindow):
         return bar
 
     def _build_sidebar(self) -> QWidget:
+        sidebar = QWidget()
+        sidebar_layout = QVBoxLayout(sidebar)
+        sidebar_layout.setContentsMargins(10, 10, 10, 10)
+        sidebar_layout.setSpacing(8)
+
+        navigation_group = QGroupBox("Comparison Pairs")
+        navigation_layout = QVBoxLayout(navigation_group)
+        self.pair_navigation_list = QListWidget()
+        self.pair_navigation_list.setObjectName("pairNavigationList")
+        self.pair_navigation_list.setMinimumHeight(150)
+        self.pair_navigation_list.currentRowChanged.connect(self._navigate_to_pair)
+        navigation_layout.addWidget(self.pair_navigation_list)
+        sidebar_layout.addWidget(navigation_group)
+
         sidebar_content = QWidget()
         layout = QVBoxLayout(sidebar_content)
-        layout.setContentsMargins(10, 10, 10, 10)
+        layout.setContentsMargins(0, 0, 0, 0)
 
         file_a_group, self.file_a_widgets = self._build_file_sidebar_group("Reference Record")
         file_b_group, self.file_b_widgets = self._build_file_sidebar_group(
@@ -373,8 +392,9 @@ class MainWindow(QMainWindow):
         scroll = QScrollArea()
         scroll.setWidgetResizable(True)
         scroll.setWidget(sidebar_content)
-        scroll.setMinimumWidth(300)
-        return scroll
+        sidebar_layout.addWidget(scroll, 1)
+        sidebar.setMinimumWidth(300)
+        return sidebar
 
     def _build_file_sidebar_group(self, title: str) -> tuple[QGroupBox, dict[str, QWidget]]:
         group = QGroupBox(title)
@@ -447,6 +467,7 @@ class MainWindow(QMainWindow):
         self._file_b = None
         self._review_queue = ReviewQueue()
         self._pending_candidate_paths = list(dict.fromkeys(candidate_paths))
+        self._candidate_transactions.clear()
         self._first_pair_ready = False
         self._candidate_ready = False
         self._start_candidate_after_thread = False
@@ -520,29 +541,38 @@ class MainWindow(QMainWindow):
                 transaction,
                 self._pending_candidate_paths,
             )
+            self._populate_pair_navigation()
             self._update_file_sidebar(widgets, transaction)
             self._start_candidate_after_thread = True
             return
-        else:
-            self._file_b = transaction
-            widgets = self.file_b_widgets
-        self._update_file_sidebar(widgets, transaction)
+        current_path = self._review_queue.current_path
+        if current_path is not None:
+            self._candidate_transactions[current_path] = transaction
+        self._activate_candidate(transaction)
+
+    def _activate_candidate(self, transaction: NistTransaction) -> None:
+        self._file_b = transaction
+        self._update_file_sidebar(self.file_b_widgets, transaction)
         session = self._refresh_comparison()
         total_warnings = sum(
             len(item.warnings) for item in (self._file_a, self._file_b) if item is not None
         ) + len(session.warnings)
-        if target == "b" and self._review_queue.current_path is not None:
-            first_pair_ready = not self._first_pair_ready
-            self._candidate_ready = True
-            self._first_pair_ready = True
-            self._set_workspace_loading(False)
-            self._update_review_status()
-            self.page_stack.setCurrentWidget(self.workspace_page)
-            if first_pair_ready:
-                self.showMaximized()
-            self.reset_zoom_action.setEnabled(True)
-            self.metadata_action.setEnabled(True)
-            self.statusBar().showMessage(f"Comparison ready | Warnings: {total_warnings}")
+        if self._review_queue.current_path is None:
+            return
+        first_pair_ready = not self._first_pair_ready
+        self._candidate_ready = True
+        self._first_pair_ready = True
+        self._set_workspace_loading(False)
+        self._update_review_status()
+        self._update_pair_navigation()
+        if self._thread is None or not self._thread.isRunning():
+            self._set_decision_buttons_enabled(True)
+        self.page_stack.setCurrentWidget(self.workspace_page)
+        if first_pair_ready:
+            self.showMaximized()
+        self.reset_zoom_action.setEnabled(True)
+        self.metadata_action.setEnabled(True)
+        self.statusBar().showMessage(f"Comparison ready | Warnings: {total_warnings}")
 
     def _refresh_comparison(self):
         session = build_cross_file_comparison(
@@ -642,11 +672,17 @@ class MainWindow(QMainWindow):
     def _start_current_candidate(self) -> None:
         path = self._review_queue.current_path
         if path is None:
-            self._finish_review()
             return
+        self._candidate_ready = False
+        self._set_decision_buttons_enabled(False)
         self._file_b = None
         self._clear_file_sidebar(self.file_b_widgets)
         self._update_review_status()
+        self._update_pair_navigation()
+        cached = self._candidate_transactions.get(path)
+        if cached is not None:
+            self._activate_candidate(cached)
+            return
         self._show_loading(
             f"Loading Comparison Record {self._review_queue.candidate_number} of "
             f"{self._review_queue.candidate_total}: {path.name}",
@@ -657,48 +693,58 @@ class MainWindow(QMainWindow):
     def _record_decision(self, decision: ReviewDecisionValue) -> None:
         if self._file_b is None:
             return
+        candidate_index = self._review_queue.current_index
+        previous = self._review_queue.decision_for_index(candidate_index)
+        if previous is not None and previous.decision == decision:
+            self._update_decision_highlight()
+            return
+        was_complete = self._review_queue.is_complete
         record = None
         try:
-            record = self._review_queue.record(decision, self._file_b)
+            record, previous = self._review_queue.set_decision(decision, self._file_b)
             (
                 record.timestamp_utc,
                 record.timestamp,
                 record.timezone,
             ) = self._settings.history_timestamp_values()
-            if decision != "PASS":
-                self._history_store.append(record)
+            self._history_store.replace(previous, record)
         except (OSError, ValueError, sqlite3.Error) as exc:
             if record is not None:
-                self._review_queue.rollback_last()
+                self._review_queue.restore_decision(candidate_index, previous)
             QMessageBox.critical(self, "Decision not saved", str(exc))
+            self._update_decision_highlight()
             return
-        self._candidate_ready = False
-        self._set_decision_buttons_enabled(False)
-        self._start_current_candidate()
+        self._update_pair_navigation()
+        self._update_review_status()
+        self._update_decision_highlight()
+        if self._review_queue.is_complete and not was_complete:
+            self._confirm_completed_session()
+            return
+        if previous is not None:
+            self.statusBar().showMessage(f"Decision updated: {decision}")
+            return
+        next_index = self._review_queue.next_undecided_index(candidate_index)
+        if next_index is not None:
+            self._select_pair(next_index)
 
     def _go_to_previous_comparison(self) -> None:
-        if not self._review_queue.decisions or not self._candidate_ready:
+        if not self._candidate_ready or self._review_queue.current_index <= 0:
             return
-        response = QMessageBox.warning(
+        self._select_pair(self._review_queue.current_index - 1)
+
+    def _confirm_completed_session(self) -> None:
+        response = QMessageBox.question(
             self,
-            "Review previous comparison",
-            "Undo the previous decision?",
-            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.Cancel,
-            QMessageBox.StandardButton.Cancel,
+            "Review complete",
+            "All comparison pairs have a decision. End the session now? "
+            "Select No to stay and review your decisions.",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+            QMessageBox.StandardButton.No,
         )
-        if response != QMessageBox.StandardButton.Yes:
+        if response == QMessageBox.StandardButton.Yes:
+            self._finish_review()
             return
-        previous_decision = self._review_queue.decisions[-1]
-        try:
-            if previous_decision.history_id is not None:
-                self._history_store.delete(previous_decision)
-        except (OSError, ValueError, sqlite3.Error) as exc:
-            QMessageBox.critical(self, "Decision not removed", str(exc))
-            return
-        self._review_queue.rollback_last()
-        self._candidate_ready = False
-        self._set_decision_buttons_enabled(False)
-        self._start_current_candidate()
+        self.statusBar().showMessage("All comparison pairs decided | Session remains open")
 
     def _end_current_session(self) -> None:
         if not self._candidate_ready:
@@ -778,11 +824,13 @@ class MainWindow(QMainWindow):
         self._file_b = None
         self._review_queue = ReviewQueue()
         self._pending_candidate_paths.clear()
+        self._candidate_transactions.clear()
         self._archive_contents_after_thread = None
         self._first_pair_ready = False
         self._candidate_ready = False
         self._start_candidate_after_thread = False
         self.comparison_grid.show_empty()
+        self.pair_navigation_list.clear()
         self._clear_file_sidebar(self.file_a_widgets)
         self._clear_file_sidebar(self.file_b_widgets)
         self.review_progress_label.setText("No comparison selected")
@@ -801,17 +849,20 @@ class MainWindow(QMainWindow):
     def _update_review_status(self) -> None:
         total = self._review_queue.candidate_total
         current = self._review_queue.current_path
-        if self._review_queue.is_complete:
-            self.review_progress_label.setText(
-                f"Review complete | {len(self._review_queue.decisions)} of {total}"
-            )
-            return
         if current is None:
             self.review_progress_label.setText("No comparison selected")
             return
         position = self._review_queue.candidate_number
+        decision = self._review_queue.decision_for_index(
+            self._review_queue.current_index
+        )
+        decision_text = (
+            f" | Decision: {decision.decision.replace('_', ' ')}"
+            if decision is not None
+            else ""
+        )
         self.review_progress_label.setText(
-            f"Comparison {position} of {total}: {current.name}"
+            f"Comparison {position} of {total}: {current.name}{decision_text}"
         )
 
     def _set_decision_buttons_enabled(self, enabled: bool) -> None:
@@ -820,9 +871,61 @@ class MainWindow(QMainWindow):
         self.pass_button.setEnabled(enabled)
         self.end_session_button.setEnabled(enabled)
         self.end_session_action.setEnabled(enabled)
-        previous_enabled = enabled and bool(self._review_queue.decisions)
+        self.pair_navigation_list.setEnabled(enabled)
+        previous_enabled = enabled and self._review_queue.current_index > 0
         self.previous_button.setEnabled(previous_enabled)
         self.previous_comparison_action.setEnabled(previous_enabled)
+        self._update_decision_highlight()
+
+    def _populate_pair_navigation(self) -> None:
+        self.pair_navigation_list.blockSignals(True)
+        self.pair_navigation_list.clear()
+        for path in self._review_queue.candidate_paths:
+            self.pair_navigation_list.addItem(path.name)
+        self.pair_navigation_list.blockSignals(False)
+        self._update_pair_navigation()
+
+    def _update_pair_navigation(self) -> None:
+        self.pair_navigation_list.blockSignals(True)
+        for index, path in enumerate(self._review_queue.candidate_paths):
+            item = self.pair_navigation_list.item(index)
+            if item is None:
+                continue
+            decision = self._review_queue.decision_for_index(index)
+            status = (
+                decision.decision.replace("_", " ")
+                if decision is not None
+                else "Not decided"
+            )
+            item.setText(f"{index + 1}. {path.name}\n{status}")
+            item.setToolTip(str(path))
+        current_index = self._review_queue.current_index
+        if 0 <= current_index < self.pair_navigation_list.count():
+            self.pair_navigation_list.setCurrentRow(current_index)
+        self.pair_navigation_list.blockSignals(False)
+        self._update_decision_highlight()
+
+    def _update_decision_highlight(self) -> None:
+        decision = self._review_queue.decision_for_index(
+            self._review_queue.current_index
+        )
+        selected = decision.decision if decision is not None else None
+        self.match_button.setChecked(selected == "MATCH")
+        self.no_match_button.setChecked(selected == "NO_MATCH")
+        self.pass_button.setChecked(selected == "PASS")
+
+    def _navigate_to_pair(self, index: int) -> None:
+        if (
+            not self._candidate_ready
+            or index < 0
+            or index == self._review_queue.current_index
+        ):
+            return
+        self._select_pair(index)
+
+    def _select_pair(self, index: int) -> None:
+        self._review_queue.set_current_index(index)
+        self._start_current_candidate()
 
     @staticmethod
     def _clear_file_sidebar(widgets: dict[str, QWidget]) -> None:

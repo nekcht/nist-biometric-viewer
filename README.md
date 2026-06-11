@@ -17,7 +17,7 @@ retained where possible instead of causing the entire transaction to fail.
   in-place transitions between later pairs
 - Same-position Reference Record/Comparison Record review for every biometric impression
 - One-to-many review queue with **MATCH**, **NO MATCH**, and uncertain **PASS** decisions
-- Previous-comparison correction and explicit end-session controls
+- Left-side pair navigation, editable decisions, and explicit end-session controls
 - Persistent internal SQLite decision history shared by all future review sessions
 - In-app history display, permanent history deletion, filterable XLSX export, and
   professional menu-driven controls
@@ -101,7 +101,8 @@ record becomes a Comparison Record. Archives are extracted before the Reference 
 phase. Archive and record filenames do not need to follow a naming convention.
 
 The visual comparison workspace remains hidden while the archive, Reference Record, and
-first Comparison Record load, then opens when the first complete pair is ready. The initial
+first Comparison Record load, then opens when the first complete pair is ready. The two
+record information headers remain visible while the fingerprint rows scroll. The initial
 pair uses the dedicated loading screen. Between later Comparison Records, the current
 workspace remains visible in a dimmed, disabled loading state. Archive extraction, parsing,
 and decoding happen on worker threads, so the UI remains responsive. Extracted archive
@@ -117,9 +118,11 @@ For each Comparison Record, choose **MATCH**, **NO MATCH**, or **PASS** after vi
 **NO MATCH** choices are committed immediately to one internal SQLite history database
 before the next Comparison Record is loaded. `NO MATCH` is stored as `NO_MATCH`.
 
-During an active session, **Previous Comparison** warns the reviewer, undoes the immediately
-preceding result, and reloads that pair for a fresh review.
-**End Session** stops the remaining queue while keeping decisions already completed. Use
+During an active session, use the left-side **Comparison Pairs** navigation panel or
+**Previous Comparison** to revisit any pair. The selected pair's current decision button is
+highlighted, and selecting another decision replaces its previous result. When every pair
+has a decision, the application asks whether to end the session or stay open for a final
+review. **End Session** stops the remaining queue while keeping decisions already completed. Use
 **View Comparison History** to display all records currently held in the internal database.
 The minimal internal record includes the selected-timezone timestamp, its timezone,
 canonical UTC time, decision, filenames, and transaction control numbers.

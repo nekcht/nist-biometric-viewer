@@ -14,6 +14,11 @@ class ComparisonGrid(QScrollArea):
     def __init__(self, parent=None) -> None:
         super().__init__(parent)
         self.setWidgetResizable(True)
+        self._header_container = QWidget(self)
+        self._header_layout = QHBoxLayout(self._header_container)
+        self._header_layout.setContentsMargins(12, 12, 12, 0)
+        self._header_layout.setSpacing(12)
+        self._header_container.hide()
         self._container = QWidget()
         self._layout = QVBoxLayout(self._container)
         self._layout.setContentsMargins(12, 12, 12, 12)
@@ -25,6 +30,7 @@ class ComparisonGrid(QScrollArea):
 
     def show_empty(self) -> None:
         self._clear()
+        self._clear_headers()
         self.session = None
         message = QLabel("No comparison selected")
         message.setObjectName("placeholder")
@@ -34,7 +40,7 @@ class ComparisonGrid(QScrollArea):
     def set_session(self, session: ComparisonSession) -> None:
         self._clear()
         self.session = session
-        self._add_record_headers(session)
+        self._set_record_headers(session)
         slot_warnings = {
             warning for slot in session.comparison_slots for warning in slot.warnings
         }
@@ -95,14 +101,46 @@ class ComparisonGrid(QScrollArea):
             if widget is not None:
                 widget.deleteLater()
 
-    def _add_record_headers(self, session: ComparisonSession) -> None:
-        summaries = QWidget()
-        layout = QHBoxLayout(summaries)
-        layout.setContentsMargins(0, 0, 0, 0)
-        layout.setSpacing(12)
-        layout.addWidget(self._record_header("Reference Record", session.file_a), 1)
-        layout.addWidget(self._record_header("Comparison Record", session.file_b), 1)
-        self._layout.addWidget(summaries)
+    def _clear_headers(self) -> None:
+        while self._header_layout.count():
+            item = self._header_layout.takeAt(0)
+            widget = item.widget()
+            if widget is not None:
+                widget.deleteLater()
+        self._header_container.hide()
+        self.setViewportMargins(0, 0, 0, 0)
+
+    def _set_record_headers(self, session: ComparisonSession) -> None:
+        self._clear_headers()
+        self._header_layout.addWidget(
+            self._record_header("Reference Record", session.file_a),
+            1,
+        )
+        self._header_layout.addWidget(
+            self._record_header("Comparison Record", session.file_b),
+            1,
+        )
+        header_height = self._header_container.sizeHint().height()
+        self.setViewportMargins(0, header_height + 8, 0, 0)
+        self._header_container.show()
+        self._position_headers()
+
+    def resizeEvent(self, event) -> None:  # noqa: N802
+        super().resizeEvent(event)
+        self._position_headers()
+
+    def _position_headers(self) -> None:
+        if self._header_container.isHidden():
+            return
+        viewport = self.viewport()
+        header_height = self._header_container.sizeHint().height()
+        self._header_container.setGeometry(
+            viewport.x(),
+            self.frameWidth(),
+            viewport.width(),
+            header_height,
+        )
+        self._header_container.raise_()
 
     @staticmethod
     def _record_header(source: str, transaction) -> QFrame:

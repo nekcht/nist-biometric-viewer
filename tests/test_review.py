@@ -74,6 +74,20 @@ def test_review_queue_accepts_pass_decision(tmp_path: Path) -> None:
     assert queue.decisions[0].decision == "PASS"
 
 
+def test_review_queue_replaces_one_decision_per_candidate(tmp_path: Path) -> None:
+    file_a = _transaction(tmp_path / "a.nist", "A-001")
+    file_b = _transaction(tmp_path / "b.nist", "B-001")
+    queue = ReviewQueue()
+    queue.start(file_a, [file_b.source_path])
+
+    first, previous = queue.set_decision("MATCH", file_b)
+    replacement, previous = queue.set_decision("NO_MATCH", file_b)
+
+    assert previous is first
+    assert queue.decisions == [replacement]
+    assert queue.is_complete
+
+
 def test_review_queue_keeps_file_a_when_manually_selected_as_candidate(tmp_path: Path) -> None:
     file_a = _transaction(tmp_path / "a.nist", "A-001")
     queue = ReviewQueue()
@@ -124,6 +138,25 @@ def test_internal_history_can_delete_exact_session_decision(tmp_path: Path) -> N
     assert store.count() == 1
     assert store.query()[0]["file_a_transaction_control_number"] == "A-1"
     assert second.history_id is None
+
+
+def test_internal_history_atomically_replaces_active_decision(tmp_path: Path) -> None:
+    store = DecisionHistoryStore(tmp_path / "history.sqlite3")
+    first = _decision(tmp_path, "1", "2026-06-10T08:00:00+00:00")
+    replacement = _decision(
+        tmp_path,
+        "1",
+        "2026-06-10T09:00:00+00:00",
+        "NO_MATCH",
+    )
+    store.append(first)
+
+    store.replace(first, replacement)
+
+    assert first.history_id is None
+    assert replacement.history_id is not None
+    assert store.count() == 1
+    assert store.query()[0]["decision"] == "NO_MATCH"
 
 
 def test_internal_history_can_delete_record_by_hidden_history_id(tmp_path: Path) -> None:
