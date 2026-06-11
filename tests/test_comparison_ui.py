@@ -17,6 +17,7 @@ from PySide6.QtWidgets import (
     QToolBar,
 )
 
+from nist_fingerprint_comparator import __version__
 from nist_fingerprint_comparator.core.models import BiometricImage
 from nist_fingerprint_comparator.core.models import NistTransaction
 from nist_fingerprint_comparator.core.archive import ArchiveComparisonSelection, ArchiveContents
@@ -904,6 +905,7 @@ def test_about_text_contains_developer_details() -> None:
     assert "Office of European Interoperability Applications" not in ABOUT_TEXT
     assert "Hellenic Police Headquarters" not in ABOUT_TEXT
     assert "10/06/2026" not in ABOUT_TEXT
+    assert __version__ in ABOUT_TEXT
 
 
 def test_about_dialog_uses_clickable_professional_contact_details() -> None:

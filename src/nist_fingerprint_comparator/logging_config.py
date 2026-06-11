@@ -6,10 +6,10 @@ import logging
 from logging.handlers import RotatingFileHandler
 from pathlib import Path
 
-from PySide6.QtCore import QStandardPaths
+from .user_data import APP_DATA_DIRECTORY_NAME, get_logs_dir
 
 LOGGER_NAME = "nist_fingerprint_comparator"
-LOG_DIRECTORY_NAME = "NIST Fingerprint Comparator"
+LOG_DIRECTORY_NAME = APP_DATA_DIRECTORY_NAME
 LOG_FILENAME = "nist_fingerprint_comparator.log"
 LOG_MAX_BYTES = 5 * 1024 * 1024
 LOG_BACKUP_COUNT = 5
@@ -48,8 +48,4 @@ def configure_logging(level: int = logging.INFO, log_path: Path | None = None) -
 
 
 def default_log_path() -> Path:
-    location = QStandardPaths.writableLocation(
-        QStandardPaths.StandardLocation.GenericDataLocation
-    )
-    base = Path(location) if location else Path.home() / ".local" / "share"
-    return base / LOG_DIRECTORY_NAME / "logs" / LOG_FILENAME
+    return get_logs_dir() / LOG_FILENAME

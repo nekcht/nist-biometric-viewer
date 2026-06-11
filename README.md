@@ -39,6 +39,55 @@ python -m venv .venv
 python -m pip install -e ".[dev]"
 ```
 
+## Windows Installer
+
+The production Windows build uses PyInstaller for the application bundle and Inno Setup 6
+for a per-user `.exe` installer. Inno Setup does not produce an MSI package.
+
+Required tools:
+
+- Python 3.11 or newer with the project's `dev` dependencies
+- PyInstaller
+- Inno Setup 6
+
+Build the packaged application only:
+
+```powershell
+.\scripts\build_windows.ps1
+```
+
+This creates `dist\ForensicPrintComparator\ForensicPrintComparator.exe` and its required
+runtime files. Build the application and installer together with:
+
+```powershell
+.\scripts\build_installer.ps1
+```
+
+The installer build looks for ISCC at
+`C:\Program Files (x86)\Inno Setup 6\ISCC.exe`. Set `ISCC_PATH` or pass `-ISCCPath` when
+Inno Setup is installed elsewhere. The final installer is written to
+`installer\output\NistBiometricViewer_Setup_<version>.exe`. The version comes from
+`nist_fingerprint_comparator.__version__`, which is also used by package metadata and the
+About dialog.
+
+The per-user installer requires no administrator privileges. It installs application files
+under `%LOCALAPPDATA%\Programs\ForensicPrintComparator` and creates these preserved folders
+under `%APPDATA%\ForensicPrintComparator`:
+
+- `config`
+- `logs`
+- `history`
+- `exports`
+- `temp`
+
+Existing settings, logs, history, and exports are not overwritten or deleted during upgrade
+or uninstall. The application also recreates missing folders at startup and copies only
+missing baseline configuration files. Raw archive contents continue to use self-cleaning
+system temporary directories rather than persistent application data.
+
+The installer creates application configuration/log/history folders only. It does not
+install or store biometric evidence files.
+
 ## Run
 
 ```powershell
@@ -80,7 +129,7 @@ returns to the initial New Comparison screen.
 Use **View Comparison History > Export History** to export the complete history, or an
 optional UTC date/time range, to a formatted XLSX workbook. History export and permanent
 history deletion are available only inside **View Comparison History**. Deletion requires
-confirmation, and the export dialog defaults to the Desktop.
+confirmation, and the export dialog defaults to the per-user `exports` folder.
 
 Use **Edit > Settings** to select the timezone recorded and displayed for new history
 entries. Canonical UTC timestamps are retained internally for reliable filtering.

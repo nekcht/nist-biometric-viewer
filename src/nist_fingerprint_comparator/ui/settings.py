@@ -7,22 +7,34 @@ from pathlib import Path
 
 from PySide6.QtCore import QDateTime, QSettings, QStandardPaths, Qt, QTimeZone
 
+from nist_fingerprint_comparator.user_data import (
+    ensure_user_data_dirs,
+    get_config_dir,
+    get_exports_dir,
+    get_history_dir,
+)
+
 HISTORY_DATABASE_FILENAME = "decision_history.sqlite3"
+SETTINGS_FILENAME = "settings.ini"
 HISTORY_TIMEZONE_KEY = "history/timezone"
 OFFER_SESSION_EXPORT_KEY = "export/offer_session_results"
 
 
 class AppSettings:
     def __init__(self, settings: QSettings | None = None) -> None:
-        self._settings = settings or QSettings()
+        if settings is None:
+            ensure_user_data_dirs()
+            settings = QSettings(
+                str(get_config_dir() / SETTINGS_FILENAME),
+                QSettings.Format.IniFormat,
+            )
+        self._settings = settings
 
     def history_database_path(self) -> Path:
-        location = QStandardPaths.writableLocation(QStandardPaths.StandardLocation.AppDataLocation)
-        base = Path(location) if location else Path.home() / ".nist_fingerprint_comparator"
-        current_path = base / HISTORY_DATABASE_FILENAME
+        current_path = get_history_dir() / HISTORY_DATABASE_FILENAME
         if current_path.exists():
             return current_path
-        for legacy_path in _legacy_history_paths(base):
+        for legacy_path in _legacy_history_paths():
             if legacy_path.exists():
                 return legacy_path
         return current_path
@@ -69,13 +81,15 @@ class AppSettings:
 
     @staticmethod
     def default_export_directory() -> Path:
-        desktop = QStandardPaths.writableLocation(QStandardPaths.StandardLocation.DesktopLocation)
-        return Path(desktop) if desktop else Path.home()
+        return get_exports_dir()
 
 
-def _legacy_history_paths(current_base: Path) -> list[Path]:
+def _legacy_history_paths() -> list[Path]:
+    location = QStandardPaths.writableLocation(QStandardPaths.StandardLocation.AppDataLocation)
+    base = Path(location) if location else Path.home() / ".nist_fingerprint_comparator"
     legacy_name = "NIST Fingerprint Comparator"
     return [
-        current_base.parent / legacy_name / HISTORY_DATABASE_FILENAME,
-        current_base.parent.parent / legacy_name / legacy_name / HISTORY_DATABASE_FILENAME,
+        base / HISTORY_DATABASE_FILENAME,
+        base.parent / legacy_name / HISTORY_DATABASE_FILENAME,
+        base.parent.parent / legacy_name / legacy_name / HISTORY_DATABASE_FILENAME,
     ]

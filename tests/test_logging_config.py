@@ -6,6 +6,7 @@ from nist_fingerprint_comparator.logging_config import (
     configure_logging,
     default_log_path,
 )
+from nist_fingerprint_comparator.user_data import APP_DATA_DIRECTORY_NAME
 
 
 def test_default_log_path_uses_named_user_data_directory() -> None:
@@ -13,6 +14,7 @@ def test_default_log_path_uses_named_user_data_directory() -> None:
 
     assert path.parent.name == "logs"
     assert path.parent.parent.name == LOG_DIRECTORY_NAME
+    assert LOG_DIRECTORY_NAME == APP_DATA_DIRECTORY_NAME
     assert path.name == "nist_fingerprint_comparator.log"
 
 

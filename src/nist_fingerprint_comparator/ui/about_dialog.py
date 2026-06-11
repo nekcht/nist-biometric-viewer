@@ -6,6 +6,8 @@ from PySide6.QtCore import Qt
 from PySide6.QtGui import QPixmap
 from PySide6.QtWidgets import QDialog, QDialogButtonBox, QHBoxLayout, QLabel, QVBoxLayout
 
+from nist_fingerprint_comparator import __version__
+
 from .resources import application_icon_path
 
 ABOUT_TEXT = (
@@ -14,6 +16,7 @@ ABOUT_TEXT = (
     "<p><b>Scope</b><br>"
     "Visual review only. The application does not perform automated biometric matching, "
     "similarity scoring, identity verification, or decision-making.</p>"
+    f"<p><b>Version</b><br>{__version__}</p>"
     "<p><b>Developed by</b><br>"
     "Nektarios Christou<br>"
     "Hellenic Police</p>"
