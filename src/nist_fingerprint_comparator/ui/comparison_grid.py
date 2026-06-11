@@ -26,9 +26,7 @@ class ComparisonGrid(QScrollArea):
     def show_empty(self) -> None:
         self._clear()
         self.session = None
-        message = QLabel(
-            "Open a Reference Record and Comparison Record to begin visual comparison."
-        )
+        message = QLabel("No comparison selected")
         message.setObjectName("placeholder")
         self._layout.addWidget(message)
         self._layout.addStretch(1)
@@ -48,6 +46,10 @@ class ComparisonGrid(QScrollArea):
             warning.setObjectName("warning")
             warning.setWordWrap(True)
             self._layout.addWidget(warning)
+        if not session.comparison_slots:
+            message = QLabel("No comparable impressions found")
+            message.setObjectName("placeholder")
+            self._layout.addWidget(message)
         for slot in session.comparison_slots:
             if slot.warnings:
                 warning = QLabel("\n".join(slot.warnings))

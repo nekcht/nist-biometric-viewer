@@ -25,24 +25,24 @@ class ImageViewer(QGraphicsView):
         self.setDragMode(QGraphicsView.DragMode.ScrollHandDrag)
         self.setTransformationAnchor(QGraphicsView.ViewportAnchor.AnchorUnderMouse)
         self.setResizeAnchor(QGraphicsView.ViewportAnchor.AnchorViewCenter)
-        self.setToolTip("Pan by dragging. Use the image controls to zoom or fit the image.")
+        self.setToolTip("Drag to pan")
         self._tool_overlay = QFrame(self.viewport())
         self._tool_overlay.setObjectName("imageToolOverlay")
         overlay_layout = QHBoxLayout(self._tool_overlay)
         overlay_layout.setContentsMargins(3, 3, 3, 3)
         overlay_layout.setSpacing(1)
         self.zoom_out_button = self._tool_button(
-            "Zoom Out",
+            "Zoom out",
             _image_tool_icon("zoom-out"),
             self.zoom_out,
         )
         self.fit_button = self._tool_button(
-            "Fit Image",
+            "Fit image to view",
             _image_tool_icon("fit"),
             self.fit_to_view,
         )
         self.zoom_in_button = self._tool_button(
-            "Zoom In",
+            "Zoom in",
             _image_tool_icon("zoom-in"),
             self.zoom_in,
         )

@@ -2,16 +2,18 @@
 
 from __future__ import annotations
 
+import shutil
 from datetime import UTC, datetime
 from pathlib import Path
 
-from PySide6.QtCore import QDateTime, QSettings, QStandardPaths, Qt, QTimeZone
+from PySide6.QtCore import QDateTime, QSettings, Qt, QTimeZone
 
 from nist_fingerprint_comparator.user_data import (
     ensure_user_data_dirs,
     get_config_dir,
     get_exports_dir,
     get_history_dir,
+    get_legacy_user_data_dirs,
 )
 
 HISTORY_DATABASE_FILENAME = "decision_history.sqlite3"
@@ -32,11 +34,13 @@ class AppSettings:
 
     def history_database_path(self) -> Path:
         current_path = get_history_dir() / HISTORY_DATABASE_FILENAME
+        current_path.parent.mkdir(parents=True, exist_ok=True)
         if current_path.exists():
             return current_path
         for legacy_path in _legacy_history_paths():
             if legacy_path.exists():
-                return legacy_path
+                shutil.copy2(legacy_path, current_path)
+                break
         return current_path
 
     def history_timezone_id(self) -> str:
@@ -85,11 +89,7 @@ class AppSettings:
 
 
 def _legacy_history_paths() -> list[Path]:
-    location = QStandardPaths.writableLocation(QStandardPaths.StandardLocation.AppDataLocation)
-    base = Path(location) if location else Path.home() / ".nist_fingerprint_comparator"
-    legacy_name = "NIST Fingerprint Comparator"
     return [
-        base / HISTORY_DATABASE_FILENAME,
-        base.parent / legacy_name / HISTORY_DATABASE_FILENAME,
-        base.parent.parent / legacy_name / legacy_name / HISTORY_DATABASE_FILENAME,
+        root / "history" / HISTORY_DATABASE_FILENAME
+        for root in get_legacy_user_data_dirs()
     ]

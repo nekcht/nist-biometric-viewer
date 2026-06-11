@@ -15,7 +15,7 @@ class PillowDecoder:
     def decode(self, image: BiometricImage) -> BiometricImage:
         if not image.image_bytes:
             image.decode_status = "not_present"
-            image.warnings.append("No embedded image payload is present.")
+            image.warnings.append("Image data unavailable.")
             return image
         try:
             with Image.open(BytesIO(image.image_bytes)) as opened:
@@ -27,7 +27,7 @@ class PillowDecoder:
             image.decode_status = "decoded"
         except Exception as exc:
             image.decode_status = "failed"
-            image.warnings.append(f"Image decoding failed: {exc}")
+            image.warnings.append(f"Image not decoded: {exc}")
         return image
 
 

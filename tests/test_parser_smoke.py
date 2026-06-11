@@ -80,7 +80,7 @@ def test_empty_input_is_nonfatal() -> None:
     transaction = NistParser().parse_bytes(b"")
 
     assert transaction.records == []
-    assert transaction.warnings == ["The selected file is empty."]
+    assert transaction.warnings == ["Selected record is empty."]
 
 
 def test_legacy_two_digit_type1_fields_are_canonicalized() -> None:

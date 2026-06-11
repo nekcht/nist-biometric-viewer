@@ -51,7 +51,7 @@ def biometric_from_binary_type4(record: NistRecord, raw_record: bytes) -> Biomet
     compression = {0: "RAW", 1: "WSQ", 2: "JPEG", 3: "JPEG2000"}.get(compression_code)
     warnings = list(record.warnings)
     if compression is None and compression_code is not None:
-        warnings.append(f"Unmapped Type-4 compression code: {compression_code}.")
+        warnings.append(f"Unsupported Type-4 compression code: {compression_code}.")
     return BiometricImage(
         record_type=4,
         idc=record.idc,

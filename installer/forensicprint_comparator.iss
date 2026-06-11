@@ -9,7 +9,8 @@
 #define AppName "Nist Biometric Viewer"
 #define AppPublisher "Hellenic Police"
 #define AppExeName "ForensicPrintComparator.exe"
-#define AppDataName "ForensicPrintComparator"
+#define InstallDirectoryName "ForensicPrintComparator"
+#define AppDataName "nistBiometricViewer"
 #define SourceRoot ".."
 
 [Setup]
@@ -17,7 +18,7 @@ AppId={{95E0F521-2618-4C2D-B035-52EC5D208D80}
 AppName={#AppName}
 AppVersion={#AppVersion}
 AppPublisher={#AppPublisher}
-DefaultDirName={localappdata}\Programs\{#AppDataName}
+DefaultDirName={localappdata}\Programs\{#InstallDirectoryName}
 DefaultGroupName={#AppName}
 DisableProgramGroupPage=yes
 PrivilegesRequired=lowest

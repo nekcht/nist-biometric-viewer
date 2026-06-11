@@ -99,46 +99,46 @@ class MainWindow(QMainWindow):
         self.new_comparison_action = self._create_action(
             "New Comparison...",
             QStyle.StandardPixmap.SP_FileDialogNewFolder,
-            "Add ANSI/NIST files or one ZIP/RAR archive",
+            "Select comparison records",
             self.new_comparison,
             shortcut="Ctrl+N",
         )
 
         self.view_history_action = self._create_action(
-            "View Comparison History...",
+            "Open History...",
             QStyle.StandardPixmap.SP_FileDialogContentsView,
-            "Display, export, or delete internal comparison history",
+            "Open history",
             self._show_history,
         )
 
         self.previous_comparison_action = self._create_action(
             "Previous Comparison",
             QStyle.StandardPixmap.SP_ArrowBack,
-            "Undo the previous result and review that Comparison Record again",
+            "Review previous comparison",
             self._go_to_previous_comparison,
         )
         self.previous_comparison_action.setEnabled(False)
 
         self.end_session_action = self._create_action(
-            "End Current Session",
+            "End Session",
             QStyle.StandardPixmap.SP_DialogCloseButton,
-            "End the active review session and keep decisions already completed",
+            "End session",
             self._end_current_session,
         )
         self.end_session_action.setEnabled(False)
 
         self.reset_zoom_action = self._create_action(
-            "Fit Images to View",
+            "Fit Images",
             QStyle.StandardPixmap.SP_BrowserReload,
-            "Fit every biometric image to its viewer",
+            "Fit images to view",
             self._reset_zoom,
             shortcut="Ctrl+0",
         )
 
         self.metadata_action = self._create_action(
-            "Toggle Metadata",
+            "Show Metadata",
             QStyle.StandardPixmap.SP_FileDialogInfoView,
-            "Show or hide image metadata tables",
+            "Show metadata",
             self._toggle_metadata,
             checkable=True,
             checked=True,
@@ -225,14 +225,10 @@ class MainWindow(QMainWindow):
         layout = QVBoxLayout(page)
         layout.setContentsMargins(80, 80, 80, 80)
         layout.addStretch(1)
-        title = QLabel("Start a one-to-many fingerprint comparison")
+        title = QLabel("New fingerprint comparison")
         title.setObjectName("setupTitle")
         title.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        text = QLabel(
-            "Add at least two ANSI/NIST files, or one ZIP or RAR archive containing "
-            "ANSI/NIST files. Select the + button or drag and drop the files anywhere "
-            "on this screen, then select Next to appoint the Reference Record."
-        )
+        text = QLabel("Add at least two ANSI/NIST records, or one ZIP/RAR archive.")
         text.setObjectName("setupText")
         text.setAlignment(Qt.AlignmentFlag.AlignCenter)
         text.setWordWrap(True)
@@ -244,7 +240,7 @@ class MainWindow(QMainWindow):
         self.add_comparison_button.setIconSize(QSize(48, 48))
         self.add_comparison_button.setFixedSize(76, 76)
         self.add_comparison_button.setToolTip(
-            "Add ANSI/NIST files or one ZIP/RAR archive"
+            "Select comparison records"
         )
         self.add_comparison_button.setAccessibleName("Add comparison sources")
         self.add_comparison_button.setCursor(Qt.CursorShape.PointingHandCursor)
@@ -267,10 +263,10 @@ class MainWindow(QMainWindow):
         layout = QVBoxLayout(page)
         layout.setContentsMargins(120, 80, 120, 80)
         layout.addStretch(1)
-        title = QLabel("Loading biometric transactions")
+        title = QLabel("Preparing comparison")
         title.setObjectName("loadingTitle")
         title.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        self.loading_message = QLabel("Preparing comparison...")
+        self.loading_message = QLabel("Loading...")
         self.loading_message.setObjectName("loadingMessage")
         self.loading_message.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self.loading_message.setWordWrap(True)
@@ -312,9 +308,7 @@ class MainWindow(QMainWindow):
         self.previous_button.setDefaultAction(self.previous_comparison_action)
         self.previous_button.setToolButtonStyle(Qt.ToolButtonStyle.ToolButtonTextBesideIcon)
         self.previous_button.setCursor(Qt.CursorShape.PointingHandCursor)
-        self.review_progress_label = QLabel(
-            "Open a comparison to begin."
-        )
+        self.review_progress_label = QLabel("No comparison selected")
         self.review_progress_label.setObjectName("reviewProgress")
         self.review_progress_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self.end_session_button = QToolButton()
@@ -370,7 +364,7 @@ class MainWindow(QMainWindow):
 
         file_a_group, self.file_a_widgets = self._build_file_sidebar_group("Reference Record")
         file_b_group, self.file_b_widgets = self._build_file_sidebar_group(
-            "Current Comparison Record"
+            "Comparison Record"
         )
         layout.addWidget(file_a_group)
         layout.addWidget(file_b_group)
@@ -401,7 +395,7 @@ class MainWindow(QMainWindow):
         warnings = QPlainTextEdit()
         warnings.setReadOnly(True)
         warnings.setMaximumHeight(110)
-        warnings.setPlaceholderText("No parser warnings.")
+        warnings.setPlaceholderText("No warnings")
         layout.addWidget(file_label)
         layout.addWidget(summary_label)
         layout.addWidget(details_group)
@@ -441,8 +435,8 @@ class MainWindow(QMainWindow):
             prefix="nist-biometric-viewer-",
             ignore_cleanup_errors=True,
         )
-        self.review_progress_label.setText(f"Preparing comparison archive: {archive_path.name}")
-        self._show_loading(f"Extracting comparison archive: {archive_path.name}")
+        self.review_progress_label.setText(f"Preparing archive: {archive_path.name}")
+        self._show_loading(f"Extracting archive: {archive_path.name}")
         self._start_archive_processing(
             archive_path,
             Path(self._archive_temp_directory.name),
@@ -461,8 +455,7 @@ class MainWindow(QMainWindow):
         self._clear_file_sidebar(self.file_a_widgets)
         self._clear_file_sidebar(self.file_b_widgets)
         self.review_progress_label.setText(
-            f"Preparing 1 Reference Record against "
-            f"{len(self._pending_candidate_paths)} Comparison Record(s)"
+            f"Comparison Records: {len(self._pending_candidate_paths)}"
         )
         self._show_loading(f"Loading Reference Record: {file_a_path.name}")
         self._start_processing(file_a_path, "a")
@@ -549,10 +542,7 @@ class MainWindow(QMainWindow):
                 self.showMaximized()
             self.reset_zoom_action.setEnabled(True)
             self.metadata_action.setEnabled(True)
-            self.statusBar().showMessage(
-                f"Comparison Record ready for decision; "
-                f"{total_warnings} parser/comparison warning(s)"
-            )
+            self.statusBar().showMessage(f"Comparison ready | Warnings: {total_warnings}")
 
     def _refresh_comparison(self):
         session = build_cross_file_comparison(
@@ -568,8 +558,8 @@ class MainWindow(QMainWindow):
         ):
             session.warnings.insert(
                 0,
-                "Warning: the Reference Record and Comparison Record are the same file. "
-                "Select PASS to ignore this comparison; PASS is not saved to history.",
+                "Reference Record and Comparison Record are identical. "
+                "Use PASS to skip without saving.",
             )
         self.comparison_grid.set_session(session)
         self.comparison_grid.set_metadata_visible(self.metadata_action.isChecked())
@@ -605,9 +595,9 @@ class MainWindow(QMainWindow):
         self._set_decision_buttons_enabled(False)
         self.statusBar().showMessage("Processing failed")
         title = (
-            "Unable to prepare comparison archive"
+            "Archive unavailable"
             if target == "archive"
-            else "Unable to open transaction"
+            else "Record unavailable"
         )
         QMessageBox.critical(self, title, message)
         if self._first_pair_ready and target != "archive":
@@ -629,7 +619,7 @@ class MainWindow(QMainWindow):
             archive_selection = self._select_archive_reference(archive_contents)
             if archive_selection is None:
                 self._reset_to_initial_screen()
-                self.statusBar().showMessage("Archive comparison cancelled")
+                self.statusBar().showMessage("Comparison cancelled")
                 return
             self._begin_comparison(
                 archive_selection.file_a_path,
@@ -680,7 +670,7 @@ class MainWindow(QMainWindow):
         except (OSError, ValueError, sqlite3.Error) as exc:
             if record is not None:
                 self._review_queue.rollback_last()
-            QMessageBox.critical(self, "Could not record decision", str(exc))
+            QMessageBox.critical(self, "Decision not saved", str(exc))
             return
         self._candidate_ready = False
         self._set_decision_buttons_enabled(False)
@@ -691,9 +681,8 @@ class MainWindow(QMainWindow):
             return
         response = QMessageBox.warning(
             self,
-            "Return to previous comparison?",
-            "The previous comparison result will be undone. That comparison will then "
-            "start again.",
+            "Review previous comparison",
+            "Undo the previous decision?",
             QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.Cancel,
             QMessageBox.StandardButton.Cancel,
         )
@@ -704,7 +693,7 @@ class MainWindow(QMainWindow):
             if previous_decision.history_id is not None:
                 self._history_store.delete(previous_decision)
         except (OSError, ValueError, sqlite3.Error) as exc:
-            QMessageBox.critical(self, "Could not erase previous decision", str(exc))
+            QMessageBox.critical(self, "Decision not removed", str(exc))
             return
         self._review_queue.rollback_last()
         self._candidate_ready = False
@@ -716,9 +705,8 @@ class MainWindow(QMainWindow):
             return
         response = QMessageBox.question(
             self,
-            "End current session?",
-            "Completed decisions will remain in comparison history. The current comparison "
-            "and all remaining Comparison Records will not be reviewed.",
+            "End session",
+            "End the current session? Completed decisions remain in History.",
             QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.Cancel,
             QMessageBox.StandardButton.Cancel,
         )
@@ -729,9 +717,7 @@ class MainWindow(QMainWindow):
         )
         completed_decisions = self._completed_session_decisions()
         self._reset_to_initial_screen()
-        self.statusBar().showMessage(
-            f"Session ended; {decision_count} completed decision(s) kept in internal history"
-        )
+        self.statusBar().showMessage(f"Session ended | Decisions saved: {decision_count}")
         self._offer_session_export(completed_decisions)
 
     def _finish_review(self) -> None:
@@ -740,9 +726,7 @@ class MainWindow(QMainWindow):
         )
         completed_decisions = self._completed_session_decisions()
         self._reset_to_initial_screen()
-        self.statusBar().showMessage(
-            f"Review complete; {decision_count} decision(s) saved to internal history"
-        )
+        self.statusBar().showMessage(f"Review complete | Decisions saved: {decision_count}")
         self._offer_session_export(completed_decisions)
 
     def _completed_session_decisions(self) -> list[ReviewDecision]:
@@ -757,9 +741,8 @@ class MainWindow(QMainWindow):
             return None
         response = QMessageBox.question(
             self,
-            "Export session results?",
-            "Would you like to export the completed results from this session to an XLSX "
-            "file?",
+            "Export session results",
+            "Export completed results to XLSX?",
             QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
             QMessageBox.StandardButton.Yes,
         )
@@ -782,9 +765,9 @@ class MainWindow(QMainWindow):
                 [decision_record(decision) for decision in decisions],
             )
         except (OSError, ValueError) as exc:
-            QMessageBox.critical(self, "Could not export session results", str(exc))
+            QMessageBox.critical(self, "Export failed", str(exc))
             return None
-        self.statusBar().showMessage(f"Session results exported to {output_path}")
+        self.statusBar().showMessage(f"Export complete: {output_path}")
         return output_path
 
     def _reset_to_initial_screen(self) -> None:
@@ -802,7 +785,7 @@ class MainWindow(QMainWindow):
         self.comparison_grid.show_empty()
         self._clear_file_sidebar(self.file_a_widgets)
         self._clear_file_sidebar(self.file_b_widgets)
-        self.review_progress_label.setText("Open a comparison to begin.")
+        self.review_progress_label.setText("No comparison selected")
         self.reset_zoom_action.setEnabled(False)
         self.metadata_action.setEnabled(False)
         self.page_stack.setCurrentWidget(self.setup_page)
@@ -820,11 +803,11 @@ class MainWindow(QMainWindow):
         current = self._review_queue.current_path
         if self._review_queue.is_complete:
             self.review_progress_label.setText(
-                f"Complete: {len(self._review_queue.decisions)} of {total} comparison(s)"
+                f"Review complete | {len(self._review_queue.decisions)} of {total}"
             )
             return
         if current is None:
-            self.review_progress_label.setText("Open a comparison to begin.")
+            self.review_progress_label.setText("No comparison selected")
             return
         position = self._review_queue.candidate_number
         self.review_progress_label.setText(
@@ -884,6 +867,9 @@ class MainWindow(QMainWindow):
 
     def _toggle_metadata(self, visible: bool) -> None:
         self.comparison_grid.set_metadata_visible(visible)
+        self.statusBar().showMessage(
+            "Sensitive metadata visible" if visible else "Metadata hidden"
+        )
 
     def _export_history(self) -> None:
         dialog = ExportHistoryDialog(self)
@@ -894,8 +880,8 @@ class MainWindow(QMainWindow):
         if not rows:
             QMessageBox.information(
                 self,
-                "No decisions to export",
-                "No decision-history records match the selected time range.",
+                "No history to export",
+                "No history matches the selected range.",
             )
             return
         selected, _ = QFileDialog.getSaveFileName(
@@ -912,15 +898,15 @@ class MainWindow(QMainWindow):
         try:
             self._xlsx_exporter.export(output_path, rows)
         except (OSError, ValueError) as exc:
-            QMessageBox.critical(self, "Could not export comparison history", str(exc))
+            QMessageBox.critical(self, "Export failed", str(exc))
             return
-        self.statusBar().showMessage(f"Comparison history exported to {output_path}")
+        self.statusBar().showMessage(f"Export complete: {output_path}")
 
     def _show_history(self) -> None:
         try:
             rows = self._history_store.query()
         except sqlite3.Error as exc:
-            QMessageBox.critical(self, "Could not display comparison history", str(exc))
+            QMessageBox.critical(self, "History unavailable", str(exc))
             return
         DecisionHistoryDialog(
             rows,
@@ -935,13 +921,13 @@ class MainWindow(QMainWindow):
         for decision in self._review_queue.decisions:
             if decision.history_id == history_id:
                 decision.history_id = None
-        self.statusBar().showMessage("Deleted selected decision-history record")
+        self.statusBar().showMessage("History record deleted")
 
     def _delete_all_history_records(self) -> int:
         deleted = self._history_store.clear()
         for decision in self._review_queue.decisions:
             decision.history_id = None
-        self.statusBar().showMessage(f"Deleted {deleted} decision-history record(s)")
+        self.statusBar().showMessage(f"History deleted | Records: {deleted}")
         return deleted
 
     def _show_about(self) -> None:
@@ -959,7 +945,7 @@ class MainWindow(QMainWindow):
             self._settings.set_history_timezone_id(dialog.history_timezone_id)
             self._settings.set_offer_session_export(dialog.offer_session_export)
         except ValueError as exc:
-            QMessageBox.critical(self, "Could not save settings", str(exc))
+            QMessageBox.critical(self, "Settings not saved", str(exc))
             return
         self.statusBar().showMessage("Settings saved")
 

@@ -42,7 +42,7 @@ class ComparisonSetupDialog(QDialog):
         initial_paths: list[Path] | None = None,
     ) -> None:
         super().__init__(parent)
-        self.setWindowTitle("New One-to-Many Comparison")
+        self.setWindowTitle("New Comparison")
         self.resize(720, 520)
         self._initial_directory = initial_directory or Path.home()
         self._record_paths: list[Path] = []
@@ -74,12 +74,9 @@ class ComparisonSetupDialog(QDialog):
     def _build_source_phase(self) -> QWidget:
         page = QWidget()
         layout = QVBoxLayout(page)
-        title = QLabel("1. Add Comparison Sources")
+        title = QLabel("1. Select Records")
         title.setObjectName("sourceTitle")
-        introduction = QLabel(
-            "Add at least two ANSI/NIST files, or one ZIP or RAR archive containing "
-            "ANSI/NIST files. Use the + button or drag and drop the files below."
-        )
+        introduction = QLabel("Add at least two ANSI/NIST records, or one ZIP/RAR archive.")
         introduction.setWordWrap(True)
         layout.addWidget(title)
         layout.addWidget(introduction)
@@ -99,8 +96,8 @@ class ComparisonSetupDialog(QDialog):
         self.add_sources_button.setToolButtonStyle(
             Qt.ToolButtonStyle.ToolButtonTextBesideIcon
         )
-        self.add_sources_button.setText("Add Files")
-        self.add_sources_button.setToolTip("Add ANSI/NIST files or one ZIP/RAR archive")
+        self.add_sources_button.setText("Add Records")
+        self.add_sources_button.setToolTip("Select comparison records")
         self.add_sources_button.setCursor(Qt.CursorShape.PointingHandCursor)
         self.add_sources_button.clicked.connect(self._choose_sources)
         clear_sources = QPushButton("Clear")
@@ -111,7 +108,7 @@ class ComparisonSetupDialog(QDialog):
         source_buttons.addStretch(1)
         layout.addLayout(source_buttons)
 
-        self.source_status = QLabel("No comparison source selected.")
+        self.source_status = QLabel("No records selected")
         self.source_status.setObjectName("sourceStatus")
         self.source_status.setWordWrap(True)
         layout.addWidget(self.source_status)
@@ -120,12 +117,9 @@ class ComparisonSetupDialog(QDialog):
     def _build_reference_phase(self) -> QWidget:
         page = QWidget()
         layout = QVBoxLayout(page)
-        title = QLabel("2. Appoint Reference Record")
+        title = QLabel("2. Select Reference Record")
         title.setObjectName("sourceTitle")
-        introduction = QLabel(
-            "Select the ANSI/NIST file that will be used as the Reference Record. "
-            "Every other file will become a Comparison Record."
-        )
+        introduction = QLabel("Other selected records become Comparison Records.")
         introduction.setWordWrap(True)
         layout.addWidget(title)
         layout.addWidget(introduction)
@@ -187,9 +181,8 @@ class ComparisonSetupDialog(QDialog):
             return
         QMessageBox.information(
             self,
-            "Unsupported source selection",
-            "Select either one ZIP/RAR archive or a group containing only supported "
-            "ANSI/NIST records.",
+            "Unsupported selection",
+            "Select one ZIP/RAR archive or supported ANSI/NIST records.",
         )
 
     def _choose_sources(self) -> None:
@@ -221,8 +214,7 @@ class ComparisonSetupDialog(QDialog):
             item.setToolTip(str(self._archive_path))
             self.source_list.addItem(item)
             self.source_status.setText(
-                f"{archive_type} archive detected. Select Next to extract its ANSI/NIST "
-                "files and appoint the Reference Record."
+                f"{archive_type} archive selected"
             )
             return
         for path in self._record_paths:
@@ -231,11 +223,10 @@ class ComparisonSetupDialog(QDialog):
             self.source_list.addItem(item)
         if self._record_paths:
             self.source_status.setText(
-                f"ANSI/NIST record group detected: {len(self._record_paths)} record(s). "
-                "Select Next to appoint the Reference Record."
+                f"Records selected: {len(self._record_paths)}"
             )
         else:
-            self.source_status.setText("No comparison source selected.")
+            self.source_status.setText("No records selected")
 
     def _selection_directory(self) -> Path:
         if self._archive_path is not None:
@@ -258,7 +249,7 @@ class ComparisonSetupDialog(QDialog):
             QMessageBox.information(
                 self,
                 "Reference Record required",
-                "Appoint one record as the Reference Record.",
+                "Select a Reference Record.",
             )
             return
         self.accept()
@@ -274,8 +265,8 @@ class ComparisonSetupDialog(QDialog):
             return True
         QMessageBox.information(
             self,
-            "Comparison source required",
-            "Add one ZIP/RAR archive or at least two ANSI/NIST records.",
+            "Records required",
+            "Select one ZIP/RAR archive or at least two ANSI/NIST records.",
         )
         return False
 

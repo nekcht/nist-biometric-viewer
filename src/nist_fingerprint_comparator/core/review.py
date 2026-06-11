@@ -99,7 +99,7 @@ class ReviewQueue:
         file_b: NistTransaction,
     ) -> ReviewDecision:
         if self.file_a is None or self.current_path is None:
-            raise ValueError("No active Comparison Record is available.")
+            raise ValueError("No Comparison Record selected.")
         review_decision = ReviewDecision(
             decision=decision,
             candidate_number=self.current_index + 1,
@@ -128,7 +128,7 @@ class DecisionHistoryStore:
 
     def append(self, decision: ReviewDecision) -> int:
         if decision.decision == "PASS":
-            raise ValueError("PASS decisions are ignored and cannot be saved to history.")
+            raise ValueError("PASS is not saved to History.")
         row = decision_record(decision)
         placeholders = ", ".join("?" for _ in HISTORY_COLUMNS)
         columns = ", ".join(HISTORY_COLUMNS)
@@ -143,7 +143,7 @@ class DecisionHistoryStore:
 
     def delete(self, decision: ReviewDecision) -> None:
         if decision.history_id is None:
-            raise ValueError("The decision does not have a persisted history record.")
+            raise ValueError("Decision is not in History.")
         self.delete_by_id(decision.history_id)
         decision.history_id = None
 
@@ -151,7 +151,7 @@ class DecisionHistoryStore:
         with closing(self._connect()) as connection, connection:
             cursor = connection.execute("DELETE FROM decisions WHERE id = ?", (history_id,))
             if cursor.rowcount != 1:
-                raise ValueError("The persisted decision record could not be found.")
+                raise ValueError("History record not found.")
 
     def clear(self) -> int:
         """Delete every persisted decision and return the number removed."""

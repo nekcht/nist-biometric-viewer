@@ -27,12 +27,12 @@ class ArchiveWorker(QObject):
     @Slot()
     def run(self) -> None:
         try:
-            self.progress.emit("Extracting ANSI/NIST records...")
+            self.progress.emit("Extracting records...")
             contents = prepare_comparison_archive(self.archive_path, self.destination)
             self.finished.emit(contents)
         except Exception as exc:
             LOGGER.exception("Comparison archive processing failed")
-            self.failed.emit(f"Could not prepare the selected archive: {exc}")
+            self.failed.emit(f"Archive processing failed: {exc}")
 
 
 class ParseWorker(QObject):
@@ -49,14 +49,14 @@ class ParseWorker(QObject):
     def run(self) -> None:
         self.started.emit()
         try:
-            self.progress.emit("Parsing transaction records...")
+            self.progress.emit("Parsing...")
             transaction = NistParser().parse_file(self.path)
             decoder = ImageDecoder()
             total = len(transaction.biometric_images)
             for index, image in enumerate(transaction.biometric_images, start=1):
-                self.progress.emit(f"Decoding biometric image {index} of {total}...")
+                self.progress.emit(f"Decoding image {index} of {total}...")
                 decoder.decode(image)
             self.finished.emit(transaction)
         except Exception as exc:
             LOGGER.exception("Transaction processing failed")
-            self.failed.emit(f"Could not process the selected file: {exc}")
+            self.failed.emit(f"Record processing failed: {exc}")

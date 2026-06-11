@@ -99,7 +99,10 @@ def test_duplicate_records_are_ranked_and_displayed_as_separate_cross_file_rows(
     assert session.comparison_slots[0].file_b_image is file_b_best
     assert session.comparison_slots[1].file_a_image is unsupported
     assert session.comparison_slots[1].file_b_image is None
-    assert "separate cross-file comparison row" in session.comparison_slots[0].warnings[0]
+    assert session.comparison_slots[0].warnings == [
+        "Multiple Right Index records. Best candidate selected."
+    ]
+    assert session.comparison_slots[1].warnings == ["Additional Right Index record."]
 
 
 def test_no_biometric_images_are_dropped() -> None:

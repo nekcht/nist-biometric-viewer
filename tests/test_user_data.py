@@ -18,11 +18,12 @@ def test_windows_appdata_uses_stable_application_directory(tmp_path: Path, monke
     monkeypatch.delenv(USER_DATA_ROOT_ENV, raising=False)
     monkeypatch.setenv("APPDATA", str(tmp_path))
 
+    assert APP_DATA_DIRECTORY_NAME == "nistBiometricViewer"
     assert get_user_data_dir() == tmp_path / APP_DATA_DIRECTORY_NAME
 
 
 def test_path_helpers_use_expected_per_user_structure(tmp_path: Path, monkeypatch) -> None:
-    root = tmp_path / "ForensicPrintComparator"
+    root = tmp_path / "nistBiometricViewer"
     monkeypatch.setenv(USER_DATA_ROOT_ENV, str(root))
 
     assert get_user_data_dir() == root
@@ -83,3 +84,13 @@ def test_default_user_files_include_no_biometric_or_evidence_samples() -> None:
 
     assert files
     assert not any(path.suffix.lower() in forbidden_extensions for path in files)
+
+
+def test_windows_installer_creates_named_user_data_directory() -> None:
+    installer = (
+        Path(__file__).resolve().parents[1] / "installer" / "forensicprint_comparator.iss"
+    ).read_text(encoding="utf-8")
+
+    assert '#define AppDataName "nistBiometricViewer"' in installer
+    assert 'DefaultDirName={localappdata}\\Programs\\{#InstallDirectoryName}' in installer
+    assert 'Name: "{userappdata}\\{#AppDataName}\\history"' in installer

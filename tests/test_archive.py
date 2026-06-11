@@ -148,5 +148,5 @@ def test_archive_requires_at_least_two_supported_records(
 def test_archive_selection_rejects_reference_outside_archive(tmp_path: Path) -> None:
     contents = ArchiveContents([tmp_path / "one.nist", tmp_path / "two.nist"])
 
-    with pytest.raises(ComparisonArchiveError, match="not part of the extracted archive"):
+    with pytest.raises(ComparisonArchiveError, match="outside the archive"):
         build_archive_comparison_selection(contents, tmp_path / "other.nist")

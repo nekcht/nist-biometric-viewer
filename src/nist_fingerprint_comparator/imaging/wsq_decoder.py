@@ -8,9 +8,7 @@ from nist_fingerprint_comparator.core.models import BiometricImage
 
 from .pillow_decoder import PillowDecoder
 
-WSQ_UNAVAILABLE_MESSAGE = (
-    "WSQ decoder not installed. Install/configure NBIS or a WSQ Pillow plugin."
-)
+WSQ_UNAVAILABLE_MESSAGE = "WSQ decoder not configured."
 
 
 class WsqDecoder:

@@ -26,10 +26,7 @@ class SettingsDialog(QDialog):
         self.setMinimumWidth(520)
 
         layout = QVBoxLayout(self)
-        guidance = QLabel(
-            "Select the timezone used when new comparison-history timestamps are recorded. "
-            "Canonical UTC time is retained internally for reliable filtering."
-        )
+        guidance = QLabel("Set the timezone shown for new History entries.")
         guidance.setWordWrap(True)
         layout.addWidget(guidance)
 
@@ -50,7 +47,7 @@ class SettingsDialog(QDialog):
         layout.addLayout(form)
 
         self.offer_session_export_checkbox = QCheckBox(
-            "Ask to export session results to XLSX when a session ends"
+            "Offer XLSX export when a session ends"
         )
         self.offer_session_export_checkbox.setChecked(offer_session_export)
         self.offer_session_export_checkbox.setCursor(Qt.CursorShape.PointingHandCursor)
@@ -59,7 +56,7 @@ class SettingsDialog(QDialog):
         buttons = QDialogButtonBox(
             QDialogButtonBox.StandardButton.Cancel | QDialogButtonBox.StandardButton.Ok
         )
-        buttons.button(QDialogButtonBox.StandardButton.Ok).setText("Save Settings")
+        buttons.button(QDialogButtonBox.StandardButton.Ok).setText("Save")
         buttons.accepted.connect(self.accept)
         buttons.rejected.connect(self.reject)
         layout.addWidget(buttons)

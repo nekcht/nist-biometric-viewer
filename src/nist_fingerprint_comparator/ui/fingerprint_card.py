@@ -54,7 +54,7 @@ class FingerprintCard(QFrame):
         self.viewer.clear_image()
         if image is None:
             self.viewer.hide()
-            self.placeholder.setText("No biometric image record is available for this position.")
+            self.placeholder.setText("No image available")
             self.placeholder.show()
             self.metadata.set_rows([])
             self.warning.hide()
@@ -68,8 +68,7 @@ class FingerprintCard(QFrame):
             self.placeholder.hide()
         else:
             self.viewer.hide()
-            status = image.decode_status.replace("_", " ").title()
-            self.placeholder.setText(f"Image preview unavailable\nDecode status: {status}")
+            self.placeholder.setText("Image not decoded")
             self.placeholder.show()
 
         if warnings:

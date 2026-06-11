@@ -42,6 +42,7 @@ def test_unsupported_wsq_does_not_crash() -> None:
 
     assert decoded.decode_status == "unsupported"
     assert WSQ_UNAVAILABLE_MESSAGE in decoded.warnings
+    assert WSQ_UNAVAILABLE_MESSAGE == "WSQ decoder not configured."
 
 
 def test_unknown_compression_is_reported() -> None:
@@ -59,7 +60,7 @@ def test_unavailable_jpeg2000_support_is_reported_as_unsupported() -> None:
     decoded = ImageDecoder().decode(image)
 
     assert decoded.decode_status == "unsupported"
-    assert "JPEG2000 decoding is unavailable" in decoded.warnings[-1]
+    assert decoded.warnings[-1] == "JPEG2000 decoder not configured."
 
 
 def test_wsq_profile_label_is_normalized() -> None:

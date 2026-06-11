@@ -11,11 +11,9 @@ from nist_fingerprint_comparator import __version__
 from .resources import application_icon_path
 
 ABOUT_TEXT = (
-    "<p>Nist Biometric Viewer supports structured visual review of ANSI/NIST "
-    "biometric transactions by presenting a Reference Record alongside Comparison Records.</p>"
+    "<p>Visual review of ANSI/NIST biometric records.</p>"
     "<p><b>Scope</b><br>"
-    "Visual review only. The application does not perform automated biometric matching, "
-    "similarity scoring, identity verification, or decision-making.</p>"
+    "Visual review only. No automated matching or identity decision.</p>"
     f"<p><b>Version</b><br>{__version__}</p>"
     "<p><b>Developed by</b><br>"
     "Nektarios Christou<br>"
@@ -48,7 +46,7 @@ class AboutDialog(QDialog):
         )
         title = QLabel(
             "<span style='font-size:18pt; font-weight:600;'>Nist Biometric Viewer</span>"
-            "<br><span style='color:#52606d;'>Professional biometric transaction review</span>"
+            "<br><span style='color:#52606d;'>Biometric record review</span>"
         )
         title.setTextFormat(Qt.TextFormat.RichText)
         header.addWidget(icon_label, 0, Qt.AlignmentFlag.AlignTop)

@@ -6,7 +6,7 @@ from pathlib import Path
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
 from PySide6.QtCore import QMimeData, QSettings, Qt, QTimeZone, QUrl
-from PySide6.QtGui import QPixmap
+from PySide6.QtGui import QAction, QPixmap
 from PySide6.QtWidgets import (
     QApplication,
     QFileDialog,
@@ -30,6 +30,7 @@ from nist_fingerprint_comparator.ui.archive_reference_dialog import (
 )
 from nist_fingerprint_comparator.ui.comparison_grid import ComparisonGrid
 from nist_fingerprint_comparator.ui.export_dialog import ExportHistoryDialog
+from nist_fingerprint_comparator.ui.fingerprint_card import FingerprintCard
 from nist_fingerprint_comparator.ui.history_dialog import DecisionHistoryDialog
 from nist_fingerprint_comparator.ui.image_viewer import ImageViewer
 from nist_fingerprint_comparator.ui.main_window import MainWindow
@@ -187,7 +188,7 @@ def test_main_window_pass_advances_without_saving_history(tmp_path) -> None:
     window._record_decision("PASS")
 
     assert window._history_store.count() == 0
-    assert "0 decision(s) saved to internal history" in window.statusBar().currentMessage()
+    assert window.statusBar().currentMessage() == "Review complete | Decisions saved: 0"
     window.close()
     application.processEvents()
 
@@ -240,8 +241,8 @@ def test_main_window_has_professional_menus_without_toolbars(tmp_path) -> None:
     assert window.no_match_button.cursor().shape() == Qt.CursorShape.PointingHandCursor
     assert window.pass_button.cursor().shape() == Qt.CursorShape.PointingHandCursor
     assert window.pass_button.text() == "PASS"
-    assert window.view_history_action.text() == "View Comparison History..."
-    assert window.end_session_action.text() == "End Current Session"
+    assert window.view_history_action.text() == "Open History..."
+    assert window.end_session_action.text() == "End Session"
     assert window.settings_action.text() == "Settings..."
     file_actions = [
         action.text()
@@ -276,8 +277,93 @@ def test_main_window_has_professional_menus_without_toolbars(tmp_path) -> None:
     assert not window.windowIcon().isNull()
     assert window.add_comparison_button.text() == ""
     assert not window.add_comparison_button.icon().isNull()
-    assert "ZIP/RAR" in window.add_comparison_button.toolTip()
+    assert window.add_comparison_button.toolTip() == "Select comparison records"
     assert window.page_stack.currentWidget() is window.setup_page
+    window.close()
+    application.processEvents()
+
+
+def test_main_workflow_copy_is_concise_and_forensic_neutral(tmp_path) -> None:
+    application = QApplication.instance() or QApplication([])
+    window = _window(tmp_path)
+    copy = "\n".join(
+        [
+            *(label.text() for label in window.findChildren(QLabel)),
+            *(button.text() for button in window.findChildren(QPushButton)),
+            *(group.title() for group in window.findChildren(QGroupBox)),
+            *(
+                f"{action.text()} {action.toolTip()}"
+                for action in window.findChildren(QAction)
+            ),
+        ]
+    )
+
+    assert "File A" not in copy
+    assert "File B" not in copy
+    assert "Visual comparison only" not in copy
+    assert "does not perform biometric matching" not in copy
+    assert "identity verification" not in copy
+    assert window.findChild(QLabel, "setupText").text() == (
+        "Add at least two ANSI/NIST records, or one ZIP/RAR archive."
+    )
+
+    window._toggle_metadata(True)
+    assert window.statusBar().currentMessage() == "Sensitive metadata visible"
+    window.close()
+    application.processEvents()
+
+
+def test_empty_states_use_short_wording() -> None:
+    application = QApplication.instance() or QApplication([])
+    grid = ComparisonGrid()
+    missing = FingerprintCard("Right Index")
+    undecoded = FingerprintCard("Right Index", _image("2"))
+
+    assert grid.findChild(QLabel, "placeholder").text() == "No comparison selected"
+    assert missing.placeholder.text() == "No image available"
+    assert undecoded.placeholder.text() == "Image not decoded"
+
+    grid.set_session(build_cross_file_comparison([], []))
+    assert "No comparable impressions found" in [
+        label.text() for label in grid.findChildren(QLabel, "placeholder")
+    ]
+
+    grid.close()
+    missing.close()
+    undecoded.close()
+    application.processEvents()
+
+
+def test_destructive_confirmations_remain_concise(tmp_path, monkeypatch) -> None:
+    application = QApplication.instance() or QApplication([])
+    window = _window(tmp_path)
+    window._candidate_ready = True
+    end_prompt: list[tuple[str, str]] = []
+    delete_prompt: list[tuple[str, str]] = []
+    monkeypatch.setattr(
+        QMessageBox,
+        "question",
+        lambda *args: end_prompt.append((args[1], args[2]))
+        or QMessageBox.StandardButton.Cancel,
+    )
+    window._end_current_session()
+
+    dialog = DecisionHistoryDialog([], clear_history=lambda: 0)
+    monkeypatch.setattr(
+        QMessageBox,
+        "warning",
+        lambda *args: delete_prompt.append((args[1], args[2]))
+        or QMessageBox.StandardButton.Cancel,
+    )
+    dialog._confirm_delete_history()
+
+    assert end_prompt == [
+        ("End session", "End the current session? Completed decisions remain in History.")
+    ]
+    assert delete_prompt == [
+        ("Delete history", "Delete all history? This cannot be undone.")
+    ]
+    dialog.close()
     window.close()
     application.processEvents()
 
@@ -359,8 +445,8 @@ def test_manually_selected_same_file_shows_pass_warning(tmp_path) -> None:
 
     session = window._refresh_comparison()
 
-    assert "same file" in session.warnings[0]
-    assert "PASS is not saved to history" in session.warnings[0]
+    assert "identical" in session.warnings[0]
+    assert "without saving" in session.warnings[0]
     assert window.comparison_grid.session is session
     window.close()
     application.processEvents()
@@ -465,7 +551,7 @@ def test_setup_dialog_accepts_rar_archive_as_alternative(tmp_path) -> None:
 
     assert dialog.archive_path == archive_path
     assert dialog.source_list.item(0).text() == f"RAR Archive: {archive_path}"
-    assert "extract" in dialog.source_status.text()
+    assert dialog.source_status.text() == "RAR archive selected"
     dialog.close()
     application.processEvents()
 
@@ -537,9 +623,9 @@ def test_fingerprint_cards_expose_per_image_controls() -> None:
 
     assert len(grid._cards) == 2
     for card in grid._cards:
-        assert card.zoom_in_button.toolTip() == "Zoom In"
-        assert card.zoom_out_button.toolTip() == "Zoom Out"
-        assert card.fit_button.toolTip() == "Fit Image"
+        assert card.zoom_in_button.toolTip() == "Zoom in"
+        assert card.zoom_out_button.toolTip() == "Zoom out"
+        assert card.fit_button.toolTip() == "Fit image to view"
         assert card.zoom_in_button.parentWidget() is card.viewer._tool_overlay
         assert card.zoom_out_button.parentWidget() is card.viewer._tool_overlay
         assert card.fit_button.parentWidget() is card.viewer._tool_overlay
@@ -706,7 +792,7 @@ def test_completed_session_offers_to_export_only_its_saved_results(
     window._record_decision("MATCH")
 
     assert output.exists()
-    assert "Session results exported" in window.statusBar().currentMessage()
+    assert "Export complete" in window.statusBar().currentMessage()
     window.close()
     application.processEvents()
 
@@ -741,7 +827,7 @@ def test_ended_session_offers_to_export_its_completed_results(
     window._end_current_session()
 
     assert output.exists()
-    assert "Session results exported" in window.statusBar().currentMessage()
+    assert "Export complete" in window.statusBar().currentMessage()
     window.close()
     application.processEvents()
 
@@ -786,12 +872,12 @@ def test_history_dialog_displays_current_database_records(tmp_path) -> None:
     assert dialog.table.rowCount() == 1
     assert dialog.table.item(0, 1).text() == "UTC"
     assert dialog.table.item(0, 2).text() == "NO_MATCH"
-    assert dialog.summary_label.text() == "1 decision record(s)"
-    assert dialog.export_history_button.text() == "Export History..."
+    assert dialog.summary_label.text() == "1 decision"
+    assert dialog.export_history_button.text() == "Export..."
     assert not dialog.export_history_button.isEnabled()
-    assert dialog.delete_selected_button.text() == "Delete Selected Row..."
+    assert dialog.delete_selected_button.text() == "Delete Selected..."
     assert not dialog.delete_selected_button.isEnabled()
-    assert dialog.delete_history_button.text() == "Delete All History..."
+    assert dialog.delete_history_button.text() == "Delete History..."
     assert not dialog.delete_history_button.isEnabled()
     dialog.close()
     window.close()
@@ -851,11 +937,11 @@ def test_history_dialog_can_delete_selected_row_and_detach_active_decision(
     dialog.delete_selected_button.click()
 
     assert dialog.table.rowCount() == 1
-    assert dialog.summary_label.text() == "1 decision record(s)"
+    assert dialog.summary_label.text() == "1 decision"
     assert window._history_store.count() == 1
     assert first.history_id is None
     assert second.history_id is not None
-    assert "Deleted selected decision-history record" in window.statusBar().currentMessage()
+    assert window.statusBar().currentMessage() == "History record deleted"
     dialog.close()
     window.close()
     application.processEvents()
@@ -887,7 +973,7 @@ def test_history_dialog_can_delete_all_history_and_detach_active_decisions(
 
     assert window._history_store.count() == 0
     assert decision.history_id is None
-    assert "Deleted 1 decision-history record(s)" in window.statusBar().currentMessage()
+    assert window.statusBar().currentMessage() == "History deleted | Records: 1"
     assert dialog.table.rowCount() == 0
     assert not dialog.export_history_button.isEnabled()
     assert not dialog.delete_history_button.isEnabled()

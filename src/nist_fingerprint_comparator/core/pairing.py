@@ -146,7 +146,9 @@ def _at(images: list[BiometricImage], index: int) -> BiometricImage | None:
 
 
 def _row_name(name: str, index: int, count: int) -> str:
-    return f"{name} - record {index + 1}" if count > 1 else name
+    if count <= 1 or index == 0:
+        return name
+    return f"Additional {name} impression {index}"
 
 
 def _duplicate_row_warnings(
@@ -157,10 +159,9 @@ def _duplicate_row_warnings(
 ) -> list[str]:
     if file_a_count <= 1 and file_b_count <= 1:
         return []
-    return [
-        f"Multiple records exist for {name}; record {index + 1} is displayed as a separate "
-        "cross-file comparison row."
-    ]
+    if index == 0:
+        return [f"Multiple {name} records. Best candidate selected."]
+    return [f"Additional {name} record."]
 
 
 def _position_sort_key(code: str) -> tuple[int, int | str]:

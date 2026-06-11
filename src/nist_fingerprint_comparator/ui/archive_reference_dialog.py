@@ -64,10 +64,7 @@ class ArchiveReferenceDialog(QDialog):
         self.setWindowTitle("Select Reference Record")
         self.resize(680, 480)
         layout = QVBoxLayout(self)
-        guidance = QLabel(
-            "Select the Reference Record for this comparison. Every other record in the "
-            "archive will be added to the Comparison Record group."
-        )
+        guidance = QLabel("Other archive records become Comparison Records.")
         guidance.setWordWrap(True)
         layout.addWidget(guidance)
 
@@ -96,7 +93,7 @@ class ArchiveReferenceDialog(QDialog):
             QMessageBox.information(
                 self,
                 "Reference Record required",
-                "Select one record from the archive to use as the Reference Record.",
+                "Select a Reference Record.",
             )
             return
         self.accept()

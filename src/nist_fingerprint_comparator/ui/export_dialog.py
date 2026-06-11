@@ -22,10 +22,7 @@ class ExportHistoryDialog(QDialog):
         super().__init__(parent)
         self.setWindowTitle("Export Comparison History")
         layout = QVBoxLayout(self)
-        introduction = QLabel(
-            "Export the complete comparison history, or restrict the XLSX export to a UTC "
-            "date/time range."
-        )
+        introduction = QLabel("Export all history or filter by UTC range.")
         introduction.setWordWrap(True)
         layout.addWidget(introduction)
 
@@ -70,7 +67,7 @@ class ExportHistoryDialog(QDialog):
             QMessageBox.information(
                 self,
                 "Invalid time range",
-                "The start of the export range must be before its end.",
+                "Start time must be before end time.",
             )
             return
         self.accept()

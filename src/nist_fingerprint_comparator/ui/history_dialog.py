@@ -43,7 +43,7 @@ class DecisionHistoryDialog(QDialog):
         self.resize(1200, 650)
         layout = QVBoxLayout(self)
 
-        self.summary_label = QLabel(f"{len(rows)} decision record(s)")
+        self.summary_label = QLabel(_history_count_text(len(rows)))
         layout.addWidget(self.summary_label)
 
         self.table = QTableWidget(len(rows), len(DISPLAY_HISTORY_COLUMNS))
@@ -66,17 +66,17 @@ class DecisionHistoryDialog(QDialog):
         layout.addWidget(self.table, 1)
 
         button_row = QHBoxLayout()
-        self.export_history_button = QPushButton("Export History...")
+        self.export_history_button = QPushButton("Export...")
         self.export_history_button.setCursor(Qt.CursorShape.PointingHandCursor)
         self.export_history_button.setEnabled(bool(rows) and export_history is not None)
         self.export_history_button.clicked.connect(self._export)
         button_row.addWidget(self.export_history_button)
-        self.delete_selected_button = QPushButton("Delete Selected Row...")
+        self.delete_selected_button = QPushButton("Delete Selected...")
         self.delete_selected_button.setObjectName("deleteHistoryButton")
         self.delete_selected_button.setCursor(Qt.CursorShape.PointingHandCursor)
         self.delete_selected_button.clicked.connect(self._confirm_delete_selected)
         button_row.addWidget(self.delete_selected_button)
-        self.delete_history_button = QPushButton("Delete All History...")
+        self.delete_history_button = QPushButton("Delete History...")
         self.delete_history_button.setObjectName("deleteHistoryButton")
         self.delete_history_button.setCursor(Qt.CursorShape.PointingHandCursor)
         self.delete_history_button.setEnabled(bool(rows) and clear_history is not None)
@@ -101,8 +101,8 @@ class DecisionHistoryDialog(QDialog):
         history_id = int(item.data(Qt.ItemDataRole.UserRole))
         response = QMessageBox.warning(
             self,
-            "Delete selected history record?",
-            "Delete the selected comparison-history record? This action cannot be undone.",
+            "Delete history record",
+            "Delete selected record? This cannot be undone.",
             QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.Cancel,
             QMessageBox.StandardButton.Cancel,
         )
@@ -111,7 +111,7 @@ class DecisionHistoryDialog(QDialog):
         try:
             self._delete_record(history_id)
         except (OSError, ValueError, sqlite3.Error) as exc:
-            QMessageBox.critical(self, "Could not delete comparison-history record", str(exc))
+            QMessageBox.critical(self, "Delete failed", str(exc))
             return
         self.table.removeRow(row_index)
         self._update_buttons()
@@ -121,9 +121,8 @@ class DecisionHistoryDialog(QDialog):
             return
         response = QMessageBox.warning(
             self,
-            "Delete comparison history?",
-            "Delete all comparison history? This action cannot be undone and may remove "
-            "operationally relevant review records.",
+            "Delete history",
+            "Delete all history? This cannot be undone.",
             QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.Cancel,
             QMessageBox.StandardButton.Cancel,
         )
@@ -132,7 +131,7 @@ class DecisionHistoryDialog(QDialog):
         try:
             self._clear_history()
         except (OSError, ValueError, sqlite3.Error) as exc:
-            QMessageBox.critical(self, "Could not delete comparison history", str(exc))
+            QMessageBox.critical(self, "Delete failed", str(exc))
             return
         self.table.setRowCount(0)
         self._update_buttons()
@@ -143,9 +142,13 @@ class DecisionHistoryDialog(QDialog):
 
     def _update_buttons(self) -> None:
         has_rows = self.table.rowCount() > 0
-        self.summary_label.setText(f"{self.table.rowCount()} decision record(s)")
+        self.summary_label.setText(_history_count_text(self.table.rowCount()))
         self.export_history_button.setEnabled(has_rows and self._export_history is not None)
         self.delete_selected_button.setEnabled(
             self.table.currentRow() >= 0 and self._delete_record is not None
         )
         self.delete_history_button.setEnabled(has_rows and self._clear_history is not None)
+
+
+def _history_count_text(count: int) -> str:
+    return f"{count} decision" if count == 1 else f"{count} decisions"

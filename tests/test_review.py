@@ -155,7 +155,7 @@ def test_internal_history_can_delete_all_records(tmp_path: Path) -> None:
 def test_pass_decision_cannot_be_written_to_internal_history(tmp_path: Path) -> None:
     store = DecisionHistoryStore(tmp_path / "history.sqlite3")
 
-    with pytest.raises(ValueError, match="PASS decisions are ignored"):
+    with pytest.raises(ValueError, match="PASS is not saved"):
         store.append(_decision(tmp_path, "1", "2026-06-10T08:00:00+00:00", "PASS"))
 
     assert store.count() == 0

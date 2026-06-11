@@ -31,7 +31,7 @@ class NistParser:
         try:
             data = source.read_bytes()
         except OSError as exc:
-            raise NistParseError(f"Could not read NIST transaction: {exc}") from exc
+            raise NistParseError(f"Record read failed: {exc}") from exc
         return self.parse_bytes(data, source_path=source)
 
     def parse_bytes(
@@ -39,7 +39,7 @@ class NistParser:
     ) -> NistTransaction:
         transaction = NistTransaction(source_path=Path(source_path))
         if not data:
-            transaction.warnings.append("The selected file is empty.")
+            transaction.warnings.append("Selected record is empty.")
             return transaction
 
         for start, end, raw_record, split_warning in self._iter_records(data):
@@ -47,7 +47,7 @@ class NistParser:
                 record = self._parse_record(raw_record, start, end)
             except Exception as exc:  # Defensive boundary for malformed transactions.
                 LOGGER.warning("Record at offset %s could not be parsed: %s", start, exc)
-                transaction.warnings.append(f"Record at offset {start} could not be parsed: {exc}")
+                transaction.warnings.append(f"Record at offset {start} not parsed: {exc}")
                 continue
             if split_warning:
                 record.warnings.append(split_warning)
@@ -55,7 +55,7 @@ class NistParser:
             self._collect_record(transaction, record, raw_record)
 
         if not transaction.records:
-            transaction.warnings.append("No recognizable ANSI/NIST records were found.")
+            transaction.warnings.append("Unsupported record.")
         return transaction
 
     def _iter_records(self, data: bytes):
@@ -87,7 +87,7 @@ class NistParser:
 
             separator = data.find(bytes([FS]), offset)
             end = size if separator < 0 else separator + 1
-            warning = "Record boundary inferred from FS because a valid length was unavailable."
+            warning = "Record boundary inferred; length unavailable."
             yield offset, end, data[offset:end], warning
             offset = end
 
@@ -123,12 +123,12 @@ class NistParser:
                 length=len(raw),
                 raw_start_offset=start,
                 raw_end_offset=end,
-                warnings=["Record type could not be identified."],
+                warnings=["Record type unavailable."],
             )
 
         if record.record_type not in SUPPORTED_RECORD_TYPES:
             record.warnings.append(
-                f"Record Type-{record.record_type} is retained but not interpreted by this MVP."
+                f"Unsupported record type: Type-{record.record_type}."
             )
         return record
 
@@ -146,7 +146,7 @@ class NistParser:
             match = TAG_RE.match(chunk)
             if not match:
                 if chunk:
-                    warnings.append("A tagged field could not be interpreted and was skipped.")
+                    warnings.append("Tagged field skipped.")
                 continue
             field_number = match.group("number").decode().zfill(3)
             key = f"{int(match.group('type'))}.{field_number}"
@@ -159,7 +159,7 @@ class NistParser:
                 payload = payload[:-1]
             fields[f"{record_type}.999"] = payload
             if not payload:
-                warnings.append(f"Type-{record_type} image field .999 is empty.")
+                warnings.append(f"Type-{record_type} image data is empty.")
         return fields, warnings
 
     def _collect_record(

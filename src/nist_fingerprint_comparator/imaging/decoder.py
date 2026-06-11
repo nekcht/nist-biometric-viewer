@@ -28,7 +28,7 @@ class ImageDecoder:
     def decode(self, image: BiometricImage) -> BiometricImage:
         if not image.image_bytes:
             image.decode_status = "not_present"
-            image.warnings.append("No embedded image payload is present.")
+            image.warnings.append("Image data unavailable.")
             return image
 
         compression = (image.compression or _detect_compression(image.image_bytes) or "").upper()
@@ -40,19 +40,19 @@ class ImageDecoder:
             if compression in {"JPEG2000", "JP2", "JPEG2K"} and decoded.decode_status == "failed":
                 decoded.decode_status = "unsupported"
                 decoded.warnings.append(
-                    "JPEG2000 decoding is unavailable in the installed Pillow build."
+                    "JPEG2000 decoder not configured."
                 )
             return decoded
         if compression == "RAW":
             image.decode_status = "unsupported"
             image.warnings.append(
-                "Raw image decoding requires profile-specific dimensions and layout."
+                "RAW image layout unsupported."
             )
             return image
 
         image.decode_status = "unsupported"
         image.warnings.append(
-            f"Unsupported or unknown compression algorithm: {image.compression or 'not specified'}."
+            f"Unsupported compression: {image.compression or 'not specified'}."
         )
         return image
 

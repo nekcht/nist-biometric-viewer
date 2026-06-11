@@ -9,7 +9,8 @@ from pathlib import Path
 
 from PySide6.QtCore import QStandardPaths
 
-APP_DATA_DIRECTORY_NAME = "ForensicPrintComparator"
+APP_DATA_DIRECTORY_NAME = "nistBiometricViewer"
+LEGACY_APP_DATA_DIRECTORY_NAMES = ("ForensicPrintComparator",)
 USER_DATA_ROOT_ENV = "FORENSICPRINT_COMPARATOR_USER_DATA_DIR"
 USER_DATA_SUBDIRECTORIES = ("config", "logs", "history", "exports", "temp")
 
@@ -20,15 +21,26 @@ def get_user_data_dir() -> Path:
     if configured:
         return Path(configured).expanduser()
 
+    return _user_data_base() / APP_DATA_DIRECTORY_NAME
+
+
+def get_legacy_user_data_dirs() -> list[Path]:
+    """Return former per-user roots eligible for one-time data migration."""
+    if os.environ.get(USER_DATA_ROOT_ENV):
+        return []
+    base = _user_data_base()
+    return [base / name for name in LEGACY_APP_DATA_DIRECTORY_NAMES]
+
+
+def _user_data_base() -> Path:
     appdata = os.environ.get("APPDATA")
     if appdata:
-        return Path(appdata) / APP_DATA_DIRECTORY_NAME
+        return Path(appdata)
 
     location = QStandardPaths.writableLocation(
         QStandardPaths.StandardLocation.GenericDataLocation
     )
-    base = Path(location) if location else Path.home() / ".local" / "share"
-    return base / APP_DATA_DIRECTORY_NAME
+    return Path(location) if location else Path.home() / ".local" / "share"
 
 
 def get_config_dir() -> Path:

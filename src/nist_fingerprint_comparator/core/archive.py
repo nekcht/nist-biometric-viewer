@@ -39,11 +39,11 @@ def prepare_comparison_archive(
     elif suffix == ".rar":
         nist_paths = _prepare_rar_archive(archive_path, destination)
     else:
-        raise ComparisonArchiveError("Select a supported ZIP or RAR archive.")
+        raise ComparisonArchiveError("Supported ZIP or RAR archive required.")
 
     if len(nist_paths) < 2:
         raise ComparisonArchiveError(
-            "The archive must contain at least two supported ANSI/NIST records."
+            "Archive requires at least two supported ANSI/NIST records."
         )
     return ArchiveContents(
         nist_paths=sorted(nist_paths, key=lambda path: str(path).casefold()),
@@ -57,7 +57,7 @@ def _prepare_zip_archive(archive_path: Path, destination: Path) -> list[Path]:
     except ComparisonArchiveError:
         raise
     except (BadZipFile, OSError, RuntimeError) as exc:
-        raise ComparisonArchiveError(f"Could not read ZIP archive: {exc}") from exc
+        raise ComparisonArchiveError(f"ZIP archive unreadable: {exc}") from exc
 
 
 def _prepare_rar_archive(archive_path: Path, destination: Path) -> list[Path]:
@@ -65,7 +65,7 @@ def _prepare_rar_archive(archive_path: Path, destination: Path) -> list[Path]:
         import rarfile
     except ImportError as exc:
         raise ComparisonArchiveError(
-            "RAR support requires the 'rarfile' package and a compatible extraction backend."
+            "RAR extraction not configured."
         ) from exc
     try:
         with rarfile.RarFile(archive_path) as archive:
@@ -73,7 +73,7 @@ def _prepare_rar_archive(archive_path: Path, destination: Path) -> list[Path]:
     except ComparisonArchiveError:
         raise
     except Exception as exc:
-        raise ComparisonArchiveError(f"Could not read RAR archive: {exc}") from exc
+        raise ComparisonArchiveError(f"RAR archive unreadable: {exc}") from exc
 
 
 def build_archive_comparison_selection(
@@ -83,12 +83,12 @@ def build_archive_comparison_selection(
     """Use the selected Reference Record and classify every other record for comparison."""
     if reference_path not in contents.nist_paths:
         raise ComparisonArchiveError(
-            "The selected Reference Record is not part of the extracted archive."
+            "Reference Record is outside the archive."
         )
     comparison_paths = [path for path in contents.nist_paths if path != reference_path]
     if not comparison_paths:
         raise ComparisonArchiveError(
-            "The archive must contain at least one Comparison Record."
+            "Archive requires a Comparison Record."
         )
     return ArchiveComparisonSelection(
         file_a_path=reference_path,

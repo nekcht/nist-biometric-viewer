@@ -72,7 +72,7 @@ About dialog.
 
 The per-user installer requires no administrator privileges. It installs application files
 under `%LOCALAPPDATA%\Programs\ForensicPrintComparator` and creates these preserved folders
-under `%APPDATA%\ForensicPrintComparator`:
+under `%APPDATA%\nistBiometricViewer`:
 
 - `config`
 - `logs`
