@@ -23,6 +23,7 @@ UsePreviousAppDir=no
 DefaultGroupName={#AppName}
 DisableProgramGroupPage=yes
 PrivilegesRequired=lowest
+MinVersion=10.0
 OutputDir=output
 OutputBaseFilename=NistBiometricViewer_Setup_{#AppVersion}
 SetupIconFile={#SourceRoot}\resources\nist_biometric_viewer.ico
@@ -31,6 +32,9 @@ Compression=lzma2
 SolidCompression=yes
 WizardStyle=modern
 SetupLogging=yes
+
+[Messages]
+WindowsVersionNotSupported=Nist Biometric Viewer requires Windows 10 or newer. Windows 7 is not supported.
 
 [Tasks]
 Name: "desktopicon"; Description: "Create a desktop shortcut"; GroupDescription: "Additional icons:"; Flags: unchecked

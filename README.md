@@ -7,6 +7,8 @@ transaction files. It compares one **Reference Record** against one or more
 The app is for visual review only. It does not perform automated biometric matching,
 identity verification, or identity decisions.
 
+Requires Windows 10 or newer.
+
 Link to Windows Installer: https://drive.google.com/file/d/1U8XlZZQ8vVqeCWIUPQigEtdImekPBOHk/view?usp=sharing
 
 ## Current Support
