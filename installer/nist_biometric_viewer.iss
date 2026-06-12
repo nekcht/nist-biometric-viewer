@@ -3,7 +3,7 @@
 ; The installer never installs biometric/evidence payloads or stores them under {app}.
 
 #ifndef AppVersion
-  #define AppVersion "0.1.0"
+  #define AppVersion "1.0.0"
 #endif
 
 #define AppName "Nist Biometric Viewer"
