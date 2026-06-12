@@ -26,8 +26,13 @@ class SanitizingLogFilter(logging.Filter):
         return True
 
 
-def configure_logging(level: int = logging.INFO, log_path: Path | None = None) -> Path | None:
-    """Configure rotating user-data and console logs without biometric payloads."""
+def configure_logging(
+    level: int = logging.INFO,
+    log_path: Path | None = None,
+    *,
+    console: bool = False,
+) -> Path | None:
+    """Configure rotating user-data logs and optional developer console output."""
     logger = logging.getLogger(LOGGER_NAME)
     logger.setLevel(level)
     logger.propagate = False
@@ -36,10 +41,11 @@ def configure_logging(level: int = logging.INFO, log_path: Path | None = None) -
     logger.handlers.clear()
 
     formatter = logging.Formatter("%(asctime)s %(levelname)s %(name)s: %(message)s")
-    console_handler = logging.StreamHandler()
-    console_handler.setFormatter(formatter)
-    console_handler.addFilter(SanitizingLogFilter())
-    logger.addHandler(console_handler)
+    if console:
+        console_handler = logging.StreamHandler()
+        console_handler.setFormatter(formatter)
+        console_handler.addFilter(SanitizingLogFilter())
+        logger.addHandler(console_handler)
 
     target = log_path or default_log_path()
     try:
@@ -51,6 +57,8 @@ def configure_logging(level: int = logging.INFO, log_path: Path | None = None) -
             encoding="utf-8",
         )
     except OSError as exc:
+        if not logger.handlers:
+            logger.addHandler(logging.NullHandler())
         logger.error(
             "Could not configure application file logging: %s",
             type(exc).__name__,
@@ -59,7 +67,7 @@ def configure_logging(level: int = logging.INFO, log_path: Path | None = None) -
     file_handler.setFormatter(formatter)
     file_handler.addFilter(SanitizingLogFilter())
     logger.addHandler(file_handler)
-    logger.info("Application logging initialized: %s", target)
+    logger.info("Application logging initialized")
     return target
 
 

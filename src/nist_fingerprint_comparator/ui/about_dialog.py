@@ -50,11 +50,6 @@ class AboutDialog(QDialog):
         header.addWidget(title, 1, Qt.AlignmentFlag.AlignVCenter)
         layout.addLayout(header)
 
-        heading = QLabel("About")
-        heading.setObjectName("aboutHeading")
-        heading.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        layout.addWidget(heading)
-
         self.details_label = QLabel(ABOUT_TEXT)
         self.details_label.setTextFormat(Qt.TextFormat.RichText)
         self.details_label.setWordWrap(True)

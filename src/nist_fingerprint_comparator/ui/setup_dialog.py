@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from PySide6.QtCore import Qt, Signal
+from PySide6.QtCore import Qt, QTimer, Signal
 from PySide6.QtWidgets import (
     QDialog,
     QFileDialog,
@@ -365,8 +365,11 @@ class _SmartSourceDropList(QListWidget):
     def dropEvent(self, event) -> None:  # noqa: N802
         paths = local_source_paths(event)
         if paths:
-            self.paths_dropped.emit(paths)
             event.acceptProposedAction()
+            QTimer.singleShot(
+                0,
+                lambda dropped_paths=paths: self.paths_dropped.emit(dropped_paths),
+            )
         else:
             event.ignore()
 

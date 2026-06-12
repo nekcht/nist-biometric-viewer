@@ -1381,14 +1381,20 @@ class MainWindow(QMainWindow):
         paths = local_source_paths(event)
         if self.page_stack.currentWidget() is self.setup_page and valid_source_paths(paths):
             event.acceptProposedAction()
-            self._open_comparison_setup(paths)
+            QTimer.singleShot(
+                0,
+                lambda dropped_paths=paths: self._open_comparison_setup(dropped_paths),
+            )
             return
         if self.page_stack.currentWidget() is self.setup_page and paths:
             event.acceptProposedAction()
-            QMessageBox.information(
-                self,
-                "Unsupported selection",
-                "Select NIST records, a ZIP archive, or a RAR archive.",
+            QTimer.singleShot(
+                0,
+                lambda: QMessageBox.information(
+                    self,
+                    "Unsupported selection",
+                    "Select NIST records, a ZIP archive, or a RAR archive.",
+                ),
             )
             return
         event.ignore()

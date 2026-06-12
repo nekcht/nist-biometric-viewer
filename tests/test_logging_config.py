@@ -19,7 +19,10 @@ def test_default_log_path_uses_named_user_data_directory() -> None:
     assert path.name == "nist_fingerprint_comparator.log"
 
 
-def test_configure_logging_writes_rotating_user_log(tmp_path: Path) -> None:
+def test_configure_logging_writes_rotating_user_log_without_console_noise(
+    tmp_path: Path,
+    capsys,
+) -> None:
     output = tmp_path / "logs" / "application.log"
     logger = logging.getLogger("nist_fingerprint_comparator")
 
@@ -30,6 +33,24 @@ def test_configure_logging_writes_rotating_user_log(tmp_path: Path) -> None:
 
     assert configured == output
     assert "test log entry" in output.read_text(encoding="utf-8")
+    assert "Application logging initialized: <path>" not in output.read_text(encoding="utf-8")
+    assert capsys.readouterr().err == ""
+    for handler in logger.handlers:
+        handler.close()
+    logger.handlers.clear()
+
+
+def test_configure_logging_can_enable_developer_console_output(
+    tmp_path: Path,
+    capsys,
+) -> None:
+    output = tmp_path / "logs" / "application.log"
+    logger = logging.getLogger("nist_fingerprint_comparator")
+
+    configure_logging(log_path=output, console=True)
+    logging.getLogger("nist_fingerprint_comparator.test").info("developer message")
+
+    assert "developer message" in capsys.readouterr().err
     for handler in logger.handlers:
         handler.close()
     logger.handlers.clear()

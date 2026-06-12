@@ -586,18 +586,25 @@ def test_setup_dialog_adds_individual_record_selections_incrementally(tmp_path) 
     application.processEvents()
 
 
-def test_setup_dialog_accepts_dragged_record_group_and_zip(tmp_path) -> None:
+def test_setup_dialog_accepts_dragged_record_group_and_zip(tmp_path, monkeypatch) -> None:
     application = QApplication.instance() or QApplication([])
     records = [tmp_path / "one.nist", tmp_path / "two.dat"]
     archive = tmp_path / "records.zip"
     for path in [*records, archive]:
         path.write_bytes(path.name.encode())
     dialog = ComparisonSetupDialog(tmp_path)
+    callbacks: list[object] = []
+    monkeypatch.setattr(
+        "nist_fingerprint_comparator.ui.setup_dialog.QTimer.singleShot",
+        lambda _delay, callback: callbacks.append(callback),
+    )
 
     record_drop = _drop_event(records)
     dialog.source_list.dropEvent(record_drop)
 
     assert record_drop.accepted
+    assert dialog.record_list.count() == 0
+    callbacks.pop(0)()
     assert dialog.record_list.count() == 2
     assert dialog.file_a_path is None
     assert not hasattr(dialog, "source_tabs")
@@ -606,6 +613,8 @@ def test_setup_dialog_accepts_dragged_record_group_and_zip(tmp_path) -> None:
     dialog.source_list.dropEvent(archive_drop)
 
     assert archive_drop.accepted
+    assert dialog.archive_path is None
+    callbacks.pop(0)()
     assert dialog.archive_path == archive
     assert dialog.source_list.count() == 1
     assert dialog.source_list.item(0).text() == f"ZIP Archive: {archive}"
@@ -699,17 +708,24 @@ def test_setup_dialog_requires_explicit_reference_appointment(tmp_path) -> None:
     application.processEvents()
 
 
-def test_initial_screen_accepts_supported_drop_and_opens_setup(tmp_path) -> None:
+def test_initial_screen_accepts_supported_drop_and_opens_setup(tmp_path, monkeypatch) -> None:
     application = QApplication.instance() or QApplication([])
     paths = [tmp_path / "one.nist", tmp_path / "two.nist"]
     window = _window(tmp_path)
     opened: list[list[Path]] = []
+    callbacks: list[object] = []
     window._open_comparison_setup = lambda initial_paths=None: opened.append(initial_paths)
+    monkeypatch.setattr(
+        "nist_fingerprint_comparator.ui.main_window.QTimer.singleShot",
+        lambda _delay, callback: callbacks.append(callback),
+    )
     event = _drop_event(paths)
 
     window.dropEvent(event)
 
     assert event.accepted
+    assert opened == []
+    callbacks.pop(0)()
     assert opened == [paths]
     window.close()
     application.processEvents()
