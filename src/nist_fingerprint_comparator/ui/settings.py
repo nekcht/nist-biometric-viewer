@@ -20,6 +20,7 @@ HISTORY_DATABASE_FILENAME = "decision_history.sqlite3"
 SETTINGS_FILENAME = "settings.ini"
 HISTORY_TIMEZONE_KEY = "history/timezone"
 OFFER_SESSION_EXPORT_KEY = "export/offer_session_results"
+AUTO_END_SESSION_KEY = "session/auto_end_when_complete"
 HISTORY_TIMESTAMP_FORMAT = "HH:mm dd-MM-yyyy"
 
 
@@ -53,12 +54,21 @@ class AppSettings:
         if not QTimeZone(timezone_id.encode()).isValid():
             raise ValueError(f"Unknown timezone: {timezone_id}")
         self._settings.setValue(HISTORY_TIMEZONE_KEY, timezone_id)
+        self._sync()
 
     def offer_session_export(self) -> bool:
         return bool(self._settings.value(OFFER_SESSION_EXPORT_KEY, True, type=bool))
 
     def set_offer_session_export(self, enabled: bool) -> None:
         self._settings.setValue(OFFER_SESSION_EXPORT_KEY, enabled)
+        self._sync()
+
+    def auto_end_session(self) -> bool:
+        return bool(self._settings.value(AUTO_END_SESSION_KEY, False, type=bool))
+
+    def set_auto_end_session(self, enabled: bool) -> None:
+        self._settings.setValue(AUTO_END_SESSION_KEY, enabled)
+        self._sync()
 
     def history_timestamp_values(self) -> tuple[str, str, str]:
         """Return canonical UTC and selected-timezone timestamps for a history record."""
@@ -87,6 +97,11 @@ class AppSettings:
     @staticmethod
     def default_export_directory() -> Path:
         return get_exports_dir()
+
+    def _sync(self) -> None:
+        self._settings.sync()
+        if self._settings.status() != QSettings.Status.NoError:
+            raise OSError("Settings storage is unavailable.")
 
 
 def _legacy_history_paths() -> list[Path]:

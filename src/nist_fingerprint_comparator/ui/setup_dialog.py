@@ -129,7 +129,7 @@ class ComparisonSetupDialog(QDialog):
         self.reference_list = ReferenceRecordList()
         self.reference_list.setCursor(Qt.CursorShape.PointingHandCursor)
         self.reference_list.setAccessibleName("Reference Record")
-        self.reference_list.itemSelectionChanged.connect(
+        self.reference_list.referenceAppointmentChanged.connect(
             self._update_reference_navigation
         )
         layout.addWidget(self.reference_list, 1)

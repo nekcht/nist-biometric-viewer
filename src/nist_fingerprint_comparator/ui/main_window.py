@@ -21,9 +21,9 @@ from PySide6.QtWidgets import (
     QMessageBox,
     QPlainTextEdit,
     QProgressBar,
-    QSizePolicy,
     QPushButton,
     QScrollArea,
+    QSizePolicy,
     QSplitter,
     QStackedWidget,
     QStyle,
@@ -54,12 +54,13 @@ from nist_fingerprint_comparator.core.review import (
     ReviewQueue,
     decision_record,
 )
+from nist_fingerprint_comparator.user_data import create_archive_temp_directory
 
 from .about_dialog import AboutDialog
 from .archive_reference_dialog import ArchiveReferenceDialog
 from .comparison_grid import ComparisonGrid
 from .export_dialog import ExportHistoryDialog
-from .history_dialog import DecisionHistoryDialog
+from .history_dialog import HISTORY_PAGE_SIZE, DecisionHistoryDialog
 from .metadata_panel import MetadataPanel
 from .resources import application_icon
 from .settings import AppSettings
@@ -89,9 +90,16 @@ class MainWindow(QMainWindow):
         self._review_queue = ReviewQueue()
         self._candidate_ready = False
         self._settings = settings or AppSettings()
-        self._history_store = history_store or DecisionHistoryStore(
-            self._settings.history_database_path()
-        )
+        self._history_store = history_store
+        self._history_startup_error = False
+        if self._history_store is None:
+            try:
+                self._history_store = DecisionHistoryStore(
+                    self._settings.history_database_path()
+                )
+            except (OSError, sqlite3.Error) as exc:
+                self._history_startup_error = True
+                LOGGER.error("History initialization failed: %s", type(exc).__name__)
         self._xlsx_exporter = DecisionXlsxExporter()
         self._pending_candidate_paths: list[Path] = []
         self._candidate_transactions: dict[Path, NistTransaction] = {}
@@ -105,6 +113,8 @@ class MainWindow(QMainWindow):
         self._create_menus()
         self._create_content()
         self.statusBar().showMessage("Ready")
+        if self._history_startup_error:
+            QTimer.singleShot(0, self._warn_history_unavailable)
 
     def _create_actions(self) -> None:
         self.new_comparison_action = self._create_action(
@@ -121,6 +131,7 @@ class MainWindow(QMainWindow):
             "Open history",
             self._show_history,
         )
+        self.view_history_action.setEnabled(self._history_store is not None)
 
         self.previous_comparison_action = self._create_action(
             "Previous Comparison",
@@ -333,6 +344,7 @@ class MainWindow(QMainWindow):
         self.review_progress_label.setVisible(False)
         self.review_progress_bar = QProgressBar()
         self.review_progress_bar.setObjectName("reviewProgressBar")
+        self.review_progress_bar.setProperty("complete", False)
         self.review_progress_bar.setTextVisible(False)
         self.review_progress_bar.setSizePolicy(
             QSizePolicy.Policy.Expanding,
@@ -506,10 +518,7 @@ class MainWindow(QMainWindow):
         """Extract a complete one-to-many archive selection for user classification."""
         self._reset_to_initial_screen()
         try:
-            self._archive_temp_directory = TemporaryDirectory(
-                prefix="nist-biometric-viewer-",
-                ignore_cleanup_errors=True,
-            )
+            self._archive_temp_directory = create_archive_temp_directory()
         except OSError as exc:
             self.handle_loading_error(
                 loading_error_from_exception(
@@ -526,7 +535,7 @@ class MainWindow(QMainWindow):
         try:
             self._start_archive_processing(
                 archive_path,
-                Path(self._archive_temp_directory.name),
+                Path(self._archive_temp_directory.name) / "contents",
             )
         except Exception as exc:
             self.handle_loading_error(
@@ -574,6 +583,7 @@ class MainWindow(QMainWindow):
         self._worker.failed.connect(self.handle_loading_error)
         self._worker.finished.connect(self._thread.quit)
         self._worker.failed.connect(self._thread.quit)
+        self._worker.cancelled.connect(self._thread.quit)
         self._thread.finished.connect(self._worker.deleteLater)
         self._thread.finished.connect(self._thread_finished_safely)
         self._thread.start()
@@ -600,6 +610,7 @@ class MainWindow(QMainWindow):
         self._worker.failed.connect(self.handle_loading_error)
         self._worker.finished.connect(self._thread.quit)
         self._worker.failed.connect(self._thread.quit)
+        self._worker.cancelled.connect(self._thread.quit)
         self._thread.finished.connect(self._worker.deleteLater)
         self._thread.finished.connect(self._thread_finished_safely)
         self._thread.start()
@@ -734,7 +745,7 @@ class MainWindow(QMainWindow):
                 stage="unknown",
                 technical_message=error,
             )
-        LOGGER.error("Loading failed: %s", error.technical_details)
+        LOGGER.error("Loading failed: %s", error.log_details)
         thread = self._thread
         if thread is not None and thread.isRunning():
             thread.requestInterruption()
@@ -840,7 +851,15 @@ class MainWindow(QMainWindow):
     def _record_decision(self, decision: ReviewDecisionValue) -> None:
         if self._file_b is None:
             return
+        if self._history_store is None:
+            QMessageBox.critical(
+                self,
+                "Decision not saved",
+                "History is unavailable. The decision was not saved.",
+            )
+            return
         candidate_index = self._review_queue.current_index
+        was_complete = self._review_queue.is_complete
         previous = self._review_queue.decision_for_index(candidate_index)
         if previous is not None and previous.decision == decision:
             self._update_decision_highlight()
@@ -857,13 +876,21 @@ class MainWindow(QMainWindow):
         except (OSError, ValueError, sqlite3.Error) as exc:
             if record is not None:
                 self._review_queue.restore_decision(candidate_index, previous)
-            QMessageBox.critical(self, "Decision not saved", str(exc))
+            LOGGER.error("Decision history write failed: %s", type(exc).__name__)
+            QMessageBox.critical(
+                self,
+                "Decision not saved",
+                "History is unavailable. The decision was not saved.",
+            )
             self._update_decision_highlight()
             return
         self._update_pair_navigation()
         self._update_review_status()
         self._update_decision_highlight()
         if self._review_queue.is_complete:
+            if not was_complete and self._settings.auto_end_session():
+                self._finish_current_session(automatic=True)
+                return
             self.statusBar().showMessage(
                 "All comparison pairs decided | Use End Session when review is complete"
             )
@@ -912,12 +939,22 @@ class MainWindow(QMainWindow):
         )
         if response != QMessageBox.StandardButton.Yes:
             return
+        self._finish_current_session()
+
+    def _finish_current_session(self, *, automatic: bool = False) -> None:
+        """End a session after confirmation or configured automatic completion."""
         decision_count = sum(
             decision.history_id is not None for decision in self._review_queue.decisions
         )
         completed_decisions = self._completed_session_decisions()
         self._reset_to_initial_screen()
         self.statusBar().showMessage(f"Session ended | Decisions saved: {decision_count}")
+        if automatic:
+            QMessageBox.information(
+                self,
+                "Session completed",
+                "All comparison pairs have a decision. The session ended automatically.",
+            )
         self._offer_session_export(completed_decisions)
 
     def _completed_session_decisions(self) -> list[ReviewDecision]:
@@ -955,8 +992,13 @@ class MainWindow(QMainWindow):
                 output_path,
                 [decision_record(decision) for decision in decisions],
             )
-        except (OSError, ValueError) as exc:
-            QMessageBox.critical(self, "Export failed", str(exc))
+        except (OSError, ValueError, RuntimeError) as exc:
+            LOGGER.error("Session export failed: %s", type(exc).__name__)
+            QMessageBox.critical(
+                self,
+                "Export failed",
+                "The export could not be written. Check the selected folder and file.",
+            )
             return None
         self.statusBar().showMessage(f"Export complete: {output_path}")
         return output_path
@@ -981,6 +1023,7 @@ class MainWindow(QMainWindow):
         self.review_progress_label.setText("No comparison selected")
         self.review_progress_bar.setRange(0, 1)
         self.review_progress_bar.setValue(0)
+        self._set_review_progress_complete(False)
         self.reset_zoom_action.setEnabled(False)
         self.metadata_action.setEnabled(False)
         self.page_stack.setCurrentWidget(self.setup_page)
@@ -998,6 +1041,9 @@ class MainWindow(QMainWindow):
                 "Temporary archive cleanup failed: %s",
                 type(exc).__name__,
             )
+            self.statusBar().showMessage(
+                "Temporary files could not be removed. Cleanup will retry on next startup."
+            )
 
     def _update_review_status(self) -> None:
         total = self._review_queue.candidate_total
@@ -1006,13 +1052,20 @@ class MainWindow(QMainWindow):
             self.review_progress_label.setText("No comparison selected")
             self.review_progress_bar.setRange(0, 1)
             self.review_progress_bar.setValue(0)
+            self._set_review_progress_complete(False)
             return
-        decided = sum(
-            1 for decision in self._review_queue.decisions if decision.history_id is not None
-        )
+        decided = len(self._review_queue.decisions)
         self.review_progress_label.setText(current.name)
         self.review_progress_bar.setRange(0, total)
         self.review_progress_bar.setValue(min(decided, total))
+        self._set_review_progress_complete(self._review_queue.is_complete)
+
+    def _set_review_progress_complete(self, complete: bool) -> None:
+        if self.review_progress_bar.property("complete") == complete:
+            return
+        self.review_progress_bar.setProperty("complete", complete)
+        self.review_progress_bar.style().unpolish(self.review_progress_bar)
+        self.review_progress_bar.style().polish(self.review_progress_bar)
 
     def _set_decision_buttons_enabled(self, enabled: bool) -> None:
         self.match_button.setEnabled(enabled)
@@ -1192,7 +1245,15 @@ class MainWindow(QMainWindow):
         if not dialog.exec():
             return
         start_utc, end_utc = dialog.selected_range_utc()
-        rows = self._history_store.query(start_utc, end_utc)
+        if self._history_store is None:
+            self._warn_history_unavailable()
+            return
+        try:
+            rows = self._history_store.query(start_utc, end_utc)
+        except (OSError, sqlite3.Error) as exc:
+            LOGGER.error("History query failed: %s", type(exc).__name__)
+            self._warn_history_unavailable()
+            return
         if not rows:
             QMessageBox.information(
                 self,
@@ -1213,26 +1274,44 @@ class MainWindow(QMainWindow):
             output_path = output_path.with_suffix(".xlsx")
         try:
             self._xlsx_exporter.export(output_path, rows)
-        except (OSError, ValueError) as exc:
-            QMessageBox.critical(self, "Export failed", str(exc))
+        except (OSError, ValueError, RuntimeError) as exc:
+            LOGGER.error("History export failed: %s", type(exc).__name__)
+            QMessageBox.critical(
+                self,
+                "Export failed",
+                "The export could not be written. Check the selected folder and file.",
+            )
             return
         self.statusBar().showMessage(f"Export complete: {output_path}")
 
     def _show_history(self) -> None:
+        if self._history_store is None:
+            self._warn_history_unavailable()
+            return
+        history_store = self._history_store
         try:
-            rows = self._history_store.query()
-        except sqlite3.Error as exc:
-            QMessageBox.critical(self, "History unavailable", str(exc))
+            total_count = history_store.count()
+            rows = history_store.query(limit=HISTORY_PAGE_SIZE)
+        except (OSError, sqlite3.Error) as exc:
+            LOGGER.error("History query failed: %s", type(exc).__name__)
+            self._warn_history_unavailable()
             return
         DecisionHistoryDialog(
             rows,
             clear_history=self._delete_all_history_records,
             delete_record=self._delete_history_record,
             export_history=self._export_history,
+            total_count=total_count,
+            load_page=lambda offset, limit: history_store.query(
+                limit=limit,
+                offset=offset,
+            ),
             parent=self,
         ).exec()
 
     def _delete_history_record(self, history_id: int) -> None:
+        if self._history_store is None:
+            raise OSError("History is unavailable.")
         self._history_store.delete_by_id(history_id)
         for decision in self._review_queue.decisions:
             if decision.history_id == history_id:
@@ -1240,6 +1319,8 @@ class MainWindow(QMainWindow):
         self.statusBar().showMessage("History record deleted")
 
     def _delete_all_history_records(self) -> int:
+        if self._history_store is None:
+            raise OSError("History is unavailable.")
         deleted = self._history_store.clear()
         for decision in self._review_queue.decisions:
             decision.history_id = None
@@ -1253,6 +1334,7 @@ class MainWindow(QMainWindow):
         dialog = SettingsDialog(
             self._settings.history_timezone_id(),
             self._settings.offer_session_export(),
+            self._settings.auto_end_session(),
             self,
         )
         if not dialog.exec():
@@ -1260,17 +1342,31 @@ class MainWindow(QMainWindow):
         try:
             self._settings.set_history_timezone_id(dialog.history_timezone_id)
             self._settings.set_offer_session_export(dialog.offer_session_export)
-        except ValueError as exc:
-            QMessageBox.critical(self, "Settings not saved", str(exc))
+            self._settings.set_auto_end_session(dialog.auto_end_session)
+        except (OSError, ValueError) as exc:
+            LOGGER.error("Settings write failed: %s", type(exc).__name__)
+            QMessageBox.critical(
+                self,
+                "Settings not saved",
+                "The settings file could not be written.",
+            )
             return
         self.statusBar().showMessage("Settings saved")
 
     def closeEvent(self, event) -> None:  # noqa: N802
         if self._thread is not None and self._thread.isRunning():
+            self._thread.requestInterruption()
             self._thread.quit()
             self._thread.wait()
         self._cleanup_archive_temp()
         super().closeEvent(event)
+
+    def _warn_history_unavailable(self) -> None:
+        QMessageBox.critical(
+            self,
+            "History unavailable",
+            "History storage is unavailable. Decisions cannot be saved.",
+        )
 
     def dragEnterEvent(self, event) -> None:  # noqa: N802
         if (

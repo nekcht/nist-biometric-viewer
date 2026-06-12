@@ -5,11 +5,12 @@ from __future__ import annotations
 import logging
 import shutil
 import stat
+from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path, PurePosixPath
 from zipfile import BadZipFile, ZipFile, ZipInfo
 
-from .loading import LoadingError, LoadingStage, validate_loading_file
+from .loading import LoadingCancelled, LoadingError, LoadingStage, validate_loading_file
 
 LOGGER = logging.getLogger(__name__)
 
@@ -56,10 +57,12 @@ class ArchiveComparisonSelection:
 def prepare_comparison_archive(
     archive_path: Path,
     destination: Path,
+    should_cancel: Callable[[], bool] | None = None,
 ) -> ArchiveContents:
     """Extract supported ANSI/NIST records for later user classification."""
     cleanup_destination = False
     try:
+        _raise_if_cancelled(should_cancel)
         validate_loading_file(archive_path, stage="archive_detection")
         try:
             destination.mkdir(parents=True, exist_ok=True)
@@ -81,11 +84,12 @@ def prepare_comparison_archive(
                 source_name=archive_path.name,
             )
         cleanup_destination = True
+        _raise_if_cancelled(should_cancel)
         suffix = archive_path.suffix.casefold()
         if suffix == ".zip":
-            nist_paths = _prepare_zip_archive(archive_path, destination)
+            nist_paths = _prepare_zip_archive(archive_path, destination, should_cancel)
         elif suffix == ".rar":
-            nist_paths = _prepare_rar_archive(archive_path, destination)
+            nist_paths = _prepare_rar_archive(archive_path, destination, should_cancel)
         else:
             raise ComparisonArchiveError(
                 "Supported ZIP or RAR archive required.",
@@ -112,11 +116,15 @@ def prepare_comparison_archive(
         raise
 
 
-def _prepare_zip_archive(archive_path: Path, destination: Path) -> list[Path]:
+def _prepare_zip_archive(
+    archive_path: Path,
+    destination: Path,
+    should_cancel: Callable[[], bool] | None,
+) -> list[Path]:
     try:
         with ZipFile(archive_path) as archive:
             _validate_zip_members(archive, archive_path.name)
-            return _extract_nist_files(archive, destination)
+            return _extract_nist_files(archive, destination, should_cancel)
     except ComparisonArchiveError:
         raise
     except RuntimeError as exc:
@@ -129,7 +137,11 @@ def _prepare_zip_archive(archive_path: Path, destination: Path) -> list[Path]:
         raise _unreadable_archive_error(archive_path.name, exc) from exc
 
 
-def _prepare_rar_archive(archive_path: Path, destination: Path) -> list[Path]:
+def _prepare_rar_archive(
+    archive_path: Path,
+    destination: Path,
+    should_cancel: Callable[[], bool] | None,
+) -> list[Path]:
     try:
         import rarfile
     except ImportError as exc:
@@ -144,8 +156,10 @@ def _prepare_rar_archive(archive_path: Path, destination: Path) -> list[Path]:
     try:
         with rarfile.RarFile(archive_path) as archive:
             _validate_rar_members(archive, archive_path.name)
-            return _extract_rar_nist_files(archive, destination)
+            return _extract_rar_nist_files(archive, destination, should_cancel)
     except ComparisonArchiveError:
+        raise
+    except LoadingCancelled:
         raise
     except Exception as exc:
         name = type(exc).__name__
@@ -192,10 +206,16 @@ def build_archive_comparison_selection(
     )
 
 
-def _extract_nist_files(archive: ZipFile, destination: Path) -> list[Path]:
+def _extract_nist_files(
+    archive: ZipFile,
+    destination: Path,
+    should_cancel: Callable[[], bool] | None,
+) -> list[Path]:
     root = destination.resolve()
     extracted: list[Path] = []
+    total_written = 0
     for member in archive.infolist():
+        _raise_if_cancelled(should_cancel)
         if member.is_dir() or Path(member.filename).suffix.casefold() not in NIST_ARCHIVE_SUFFIXES:
             continue
         relative_path = _safe_member_path(member)
@@ -206,15 +226,27 @@ def _extract_nist_files(archive: ZipFile, destination: Path) -> list[Path]:
             raise ComparisonArchiveError("Duplicate ZIP destination path.")
         output_path.parent.mkdir(parents=True, exist_ok=True)
         with archive.open(member) as source, output_path.open("wb") as output:
-            _copy_archive_member(source, output, archive_name="ZIP")
+            total_written += _copy_archive_member(
+                source,
+                output,
+                archive_name="ZIP",
+                should_cancel=should_cancel,
+                remaining_total_bytes=MAX_ARCHIVE_TOTAL_BYTES - total_written,
+            )
         extracted.append(output_path)
     return extracted
 
 
-def _extract_rar_nist_files(archive, destination: Path) -> list[Path]:
+def _extract_rar_nist_files(
+    archive,
+    destination: Path,
+    should_cancel: Callable[[], bool] | None,
+) -> list[Path]:
     root = destination.resolve()
     extracted: list[Path] = []
+    total_written = 0
     for member in archive.infolist():
+        _raise_if_cancelled(should_cancel)
         filename = member.filename
         if member.isdir() or Path(filename).suffix.casefold() not in NIST_ARCHIVE_SUFFIXES:
             continue
@@ -230,7 +262,13 @@ def _extract_rar_nist_files(archive, destination: Path) -> list[Path]:
             raise ComparisonArchiveError("Duplicate RAR destination path.")
         output_path.parent.mkdir(parents=True, exist_ok=True)
         with archive.open(member) as source, output_path.open("wb") as output:
-            _copy_archive_member(source, output, archive_name="RAR")
+            total_written += _copy_archive_member(
+                source,
+                output,
+                archive_name="RAR",
+                should_cancel=should_cancel,
+                remaining_total_bytes=MAX_ARCHIVE_TOTAL_BYTES - total_written,
+            )
         extracted.append(output_path)
     return extracted
 
@@ -419,15 +457,29 @@ def _clean_failed_destination(destination: Path) -> None:
         )
 
 
-def _copy_archive_member(source, output, *, archive_name: str) -> None:
+def _copy_archive_member(
+    source,
+    output,
+    *,
+    archive_name: str,
+    should_cancel: Callable[[], bool] | None,
+    remaining_total_bytes: int,
+) -> int:
     written = 0
     while chunk := source.read(1024 * 1024):
+        _raise_if_cancelled(should_cancel)
         written += len(chunk)
-        if written > MAX_ARCHIVE_MEMBER_BYTES:
+        if written > MAX_ARCHIVE_MEMBER_BYTES or written > remaining_total_bytes:
             raise ComparisonArchiveError(
-                f"{archive_name} member exceeded the extraction limit.",
+                f"{archive_name} extraction exceeded the safety limit.",
                 title="Archive could not be opened",
-                user_message="The selected archive contains a file that is too large.",
+                user_message="The selected archive is too large to extract safely.",
                 stage="archive_extraction",
             )
         output.write(chunk)
+    return written
+
+
+def _raise_if_cancelled(should_cancel: Callable[[], bool] | None) -> None:
+    if should_cancel is not None and should_cancel():
+        raise LoadingCancelled

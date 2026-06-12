@@ -6,14 +6,18 @@ import ctypes
 import logging
 import sys
 
-from PySide6.QtWidgets import QApplication
+from PySide6.QtWidgets import QApplication, QMessageBox
 
 from . import __version__
 from .logging_config import configure_logging
 from .ui.main_window import MainWindow
 from .ui.resources import application_icon
 from .ui.styles import APP_STYLESHEET
-from .user_data import ensure_user_data_dirs, install_default_user_files
+from .user_data import (
+    cleanup_stale_temp_dirs,
+    ensure_user_data_dirs,
+    install_default_user_files,
+)
 
 WINDOWS_APP_USER_MODEL_ID = "HellenicPolice.NistBiometricViewer"
 LOGGER = logging.getLogger(__name__)
@@ -44,11 +48,6 @@ def _configure_windows_app_identity() -> None:
 
 
 def main() -> int:
-    ensure_user_data_dirs()
-    install_default_user_files()
-    configure_logging()
-    _install_exception_logger()
-    LOGGER.info("Starting Nist Biometric Viewer")
     _configure_windows_app_identity()
     application = QApplication(sys.argv)
     application.setApplicationName("Nist Biometric Viewer")
@@ -57,7 +56,50 @@ def main() -> int:
     application.setOrganizationName("Hellenic Police")
     application.setWindowIcon(application_icon())
     application.setStyleSheet(APP_STYLESHEET)
-    window = MainWindow()
+    try:
+        ensure_user_data_dirs()
+    except OSError:
+        QMessageBox.critical(
+            None,
+            "Folder unavailable",
+            "Required application folders could not be created or accessed.",
+        )
+        return 1
+
+    configure_logging()
+    _install_exception_logger()
+    LOGGER.info("Starting Nist Biometric Viewer")
+    try:
+        install_default_user_files()
+    except OSError as exc:
+        LOGGER.warning("Default configuration installation failed: %s", type(exc).__name__)
+        QMessageBox.warning(
+            None,
+            "Configuration unavailable",
+            "Default configuration files could not be installed. The application can continue.",
+        )
+
+    cleaned, cleanup_failures = cleanup_stale_temp_dirs()
+    if cleaned:
+        LOGGER.info("Removed stale temporary archive sessions: %s", len(cleaned))
+    if cleanup_failures:
+        LOGGER.warning("Stale temporary archive cleanup failures: %s", len(cleanup_failures))
+        QMessageBox.warning(
+            None,
+            "Temporary files could not be removed",
+            "Some old temporary files could not be removed. The application can continue.",
+        )
+
+    try:
+        window = MainWindow()
+    except Exception as exc:
+        LOGGER.critical("Application startup failed: %s", type(exc).__name__)
+        QMessageBox.critical(
+            None,
+            "Application could not start",
+            "The application could not initialize its local data.",
+        )
+        return 1
     window.show()
     return application.exec()
 

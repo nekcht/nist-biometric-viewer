@@ -12,6 +12,7 @@ from nist_fingerprint_comparator.core.archive import (
     build_archive_comparison_selection,
     prepare_comparison_archive,
 )
+from nist_fingerprint_comparator.core.loading import LoadingCancelled
 
 
 def _archive(path: Path, members: dict[str, bytes]) -> Path:
@@ -272,3 +273,38 @@ def test_archive_selection_rejects_reference_outside_archive(tmp_path: Path) -> 
 
     with pytest.raises(ComparisonArchiveError, match="outside the archive"):
         build_archive_comparison_selection(contents, tmp_path / "other.nist")
+
+
+def test_archive_cancellation_cleans_partial_extraction(tmp_path: Path) -> None:
+    archive = _archive(
+        tmp_path / "records.zip",
+        {"reference.nist": b"a", "comparison.nist": b"b"},
+    )
+    destination = tmp_path / "extracted"
+    checks = 0
+
+    def should_cancel() -> bool:
+        nonlocal checks
+        checks += 1
+        return checks >= 3
+
+    with pytest.raises(LoadingCancelled):
+        prepare_comparison_archive(archive, destination, should_cancel=should_cancel)
+
+    assert destination.exists()
+    assert list(destination.iterdir()) == []
+
+
+def test_archive_unavailable_destination_has_controlled_error(tmp_path: Path) -> None:
+    archive = _archive(
+        tmp_path / "records.zip",
+        {"reference.nist": b"a", "comparison.nist": b"b"},
+    )
+    blocked_parent = tmp_path / "blocked"
+    blocked_parent.write_bytes(b"not a directory")
+
+    with pytest.raises(ComparisonArchiveError) as raised:
+        prepare_comparison_archive(archive, blocked_parent / "extracted")
+
+    assert raised.value.title == "Temporary folder unavailable"
+    assert raised.value.user_message == "A secure temporary folder could not be created."

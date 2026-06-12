@@ -5,7 +5,7 @@ from __future__ import annotations
 import os
 from pathlib import Path
 
-from PySide6.QtCore import Qt
+from PySide6.QtCore import Qt, Signal
 from PySide6.QtWidgets import (
     QDialog,
     QDialogButtonBox,
@@ -21,18 +21,20 @@ from PySide6.QtWidgets import (
 class ReferenceRecordList(QListWidget):
     """List a record group and expose its appointed Reference Record."""
 
+    referenceAppointmentChanged = Signal()
+
     def __init__(self, paths: list[Path] | None = None, parent=None) -> None:
         super().__init__(parent)
         self._paths: list[Path] = []
+        self._appointed_reference: Path | None = None
         self.setSelectionMode(QListWidget.SelectionMode.SingleSelection)
+        self.itemClicked.connect(self._appoint_item)
+        self.itemActivated.connect(self._appoint_item)
         self.set_paths(paths or [])
 
     @property
     def reference_path(self) -> Path | None:
-        item = self.currentItem()
-        if item is None:
-            return None
-        return self._paths[item.data(Qt.ItemDataRole.UserRole)]
+        return self._appointed_reference
 
     def set_paths(
         self,
@@ -49,14 +51,45 @@ class ReferenceRecordList(QListWidget):
             item.setToolTip(str(path))
             item.setData(Qt.ItemDataRole.UserRole, index)
             self.addItem(item)
-        self.select_reference(previous_reference)
+        self._set_appointed_reference(previous_reference)
 
     def select_reference(self, path: Path | None) -> None:
         """Appoint a record, primarily for repeatable UI testing."""
-        if path in self._paths:
-            self.setCurrentRow(self._paths.index(path))
-        else:
+        self._set_appointed_reference(path)
+
+    def keyPressEvent(self, event) -> None:  # noqa: N802
+        super().keyPressEvent(event)
+        if event.key() in {
+            Qt.Key.Key_Down,
+            Qt.Key.Key_Up,
+            Qt.Key.Key_Home,
+            Qt.Key.Key_End,
+            Qt.Key.Key_PageDown,
+            Qt.Key.Key_PageUp,
+            Qt.Key.Key_Space,
+            Qt.Key.Key_Return,
+            Qt.Key.Key_Enter,
+        }:
+            self._appoint_item(self.currentItem())
+
+    def _appoint_item(self, item: QListWidgetItem | None) -> None:
+        if item is None:
+            return
+        self._set_appointed_reference(
+            self._paths[item.data(Qt.ItemDataRole.UserRole)]
+        )
+
+    def _set_appointed_reference(self, path: Path | None) -> None:
+        appointed = path if path in self._paths else None
+        if appointed is None:
+            self.clearSelection()
             self.setCurrentRow(-1)
+        else:
+            self.setCurrentRow(self._paths.index(appointed))
+        if appointed == self._appointed_reference:
+            return
+        self._appointed_reference = appointed
+        self.referenceAppointmentChanged.emit()
 
 
 class ArchiveReferenceDialog(QDialog):
@@ -73,7 +106,7 @@ class ArchiveReferenceDialog(QDialog):
         layout.addWidget(guidance)
 
         self.record_list = ReferenceRecordList(paths)
-        self.record_list.itemSelectionChanged.connect(self._update_next_button)
+        self.record_list.referenceAppointmentChanged.connect(self._update_next_button)
         self.record_list.itemDoubleClicked.connect(lambda _: self._validate_and_accept())
         layout.addWidget(self.record_list, 1)
 

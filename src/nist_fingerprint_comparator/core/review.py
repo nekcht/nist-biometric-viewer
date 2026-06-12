@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
+import os
 import sqlite3
+import tempfile
 from contextlib import closing
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
@@ -239,9 +241,12 @@ class DecisionHistoryStore:
         self,
         start_utc: datetime | None = None,
         end_utc: datetime | None = None,
+        *,
+        limit: int | None = None,
+        offset: int = 0,
     ) -> list[dict[str, str]]:
         clauses: list[str] = []
-        parameters: list[str] = []
+        parameters: list[str | int] = []
         if start_utc is not None:
             clauses.append("timestamp_utc >= ?")
             parameters.append(_utc_iso(start_utc))
@@ -249,10 +254,16 @@ class DecisionHistoryStore:
             clauses.append("timestamp_utc <= ?")
             parameters.append(_utc_iso(end_utc))
         where = f" WHERE {' AND '.join(clauses)}" if clauses else ""
+        pagination = ""
+        if limit is not None:
+            if limit <= 0 or offset < 0:
+                raise ValueError("History page size and offset must be positive.")
+            pagination = " LIMIT ? OFFSET ?"
+            parameters.extend((limit, offset))
         with closing(self._connect()) as connection:
             rows = connection.execute(
                 f"SELECT id, {', '.join(HISTORY_COLUMNS)} FROM decisions"
-                f"{where} ORDER BY timestamp_utc, id",
+                f"{where} ORDER BY timestamp_utc DESC, id DESC{pagination}",
                 parameters,
             ).fetchall()
         return [_history_row(row) for row in rows]
@@ -329,7 +340,7 @@ class DecisionHistoryStore:
         )
 
     def _connect(self) -> sqlite3.Connection:
-        return sqlite3.connect(self.path)
+        return sqlite3.connect(self.path, timeout=5.0)
 
 
 class DecisionXlsxExporter:
@@ -356,7 +367,22 @@ class DecisionXlsxExporter:
                 max(len(value) for value in values) + 2,
                 72,
             )
-        workbook.save(path)
+        temporary_path: Path | None = None
+        try:
+            with tempfile.NamedTemporaryFile(
+                prefix=f".{path.stem}-",
+                suffix=".tmp",
+                dir=path.parent,
+                delete=False,
+            ) as temporary_file:
+                temporary_path = Path(temporary_file.name)
+            workbook.save(temporary_path)
+            os.replace(temporary_path, path)
+            temporary_path = None
+        finally:
+            workbook.close()
+            if temporary_path is not None:
+                temporary_path.unlink(missing_ok=True)
 
 
 def available_export_path(path: Path) -> Path:

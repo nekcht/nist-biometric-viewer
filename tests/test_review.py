@@ -107,7 +107,30 @@ def test_internal_history_accumulates_across_future_sessions(tmp_path: Path) -> 
     reopened.append(_decision(tmp_path, "2", "2026-06-10T09:00:00+00:00", "NO_MATCH"))
 
     assert reopened.count() == 2
-    assert [row["decision"] for row in reopened.query()] == ["MATCH", "NO_MATCH"]
+    assert [row["decision"] for row in reopened.query()] == ["NO_MATCH", "MATCH"]
+
+
+def test_internal_history_query_supports_newest_first_pages(tmp_path: Path) -> None:
+    store = DecisionHistoryStore(tmp_path / "history.sqlite3")
+    for index in range(55):
+        store.append(
+            _decision(
+                tmp_path,
+                str(index),
+                f"2026-06-10T12:{index:02}:00+00:00",
+                "MATCH" if index % 2 else "NO_MATCH",
+            )
+        )
+
+    first_page = store.query(limit=50)
+    second_page = store.query(limit=50, offset=50)
+
+    assert len(first_page) == 50
+    assert len(second_page) == 5
+    assert first_page[0]["file_b_reference_number"] == "MN1-B-54"
+    assert first_page[-1]["file_b_reference_number"] == "MN1-B-5"
+    assert second_page[0]["file_b_reference_number"] == "MN1-B-4"
+    assert second_page[-1]["file_b_reference_number"] == "MN1-B-0"
 
 
 def test_internal_history_query_filters_utc_time_range(tmp_path: Path) -> None:
@@ -172,7 +195,7 @@ def test_internal_history_can_delete_record_by_hidden_history_id(tmp_path: Path)
     store.delete_by_id(history_id)
 
     assert store.count() == 1
-    assert store.query()[0]["decision"] == "NO_MATCH"
+    assert store.query()[0]["decision"] == "MATCH"
 
 
 def test_internal_history_can_delete_all_records(tmp_path: Path) -> None:
@@ -236,9 +259,9 @@ def test_existing_history_database_removes_sha_columns_and_pass_rows(tmp_path: P
 
     assert columns == ["id", *HISTORY_COLUMNS]
     assert saved_timestamps == [("08:00 10-06-2026",), ("10:00 10-06-2026",)]
-    assert [row["decision"] for row in store.query()] == ["MATCH", "NO_MATCH"]
-    assert store.query()[0]["file_a_reference_number"] == ""
-    assert store.query()[0]["file_b_reference_number"] == ""
+    assert [row["decision"] for row in store.query()] == ["NO_MATCH", "MATCH"]
+    assert store.query()[-1]["file_a_reference_number"] == ""
+    assert store.query()[-1]["file_b_reference_number"] == ""
     assert all("sha256" not in column for column in HISTORY_COLUMNS)
     assert HISTORY_COLUMNS == [
         "timestamp_utc",
@@ -298,3 +321,29 @@ def test_queue_can_restore_candidate_after_persistence_failure(tmp_path: Path) -
     assert queue.decisions == []
     assert rolled_back is not None
     assert rolled_back.decision == "MATCH"
+
+
+def test_corrupt_history_database_has_controlled_database_error(tmp_path: Path) -> None:
+    database = tmp_path / "history.sqlite3"
+    database.write_bytes(b"not a sqlite database")
+
+    with pytest.raises(sqlite3.DatabaseError):
+        DecisionHistoryStore(database)
+
+
+def test_failed_atomic_export_removes_temporary_workbook(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    output = tmp_path / "history.xlsx"
+    decision = _decision(tmp_path, "1", "2026-06-10T12:00:00+00:00")
+    monkeypatch.setattr(
+        "nist_fingerprint_comparator.core.review.os.replace",
+        lambda *_args: (_ for _ in ()).throw(PermissionError("file is open")),
+    )
+
+    with pytest.raises(PermissionError):
+        DecisionXlsxExporter().export(output, [decision_record(decision)])
+
+    assert not output.exists()
+    assert list(tmp_path.glob(".history-*.tmp")) == []

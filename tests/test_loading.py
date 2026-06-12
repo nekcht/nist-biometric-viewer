@@ -1,7 +1,9 @@
 import logging
 import os
+import sqlite3
 from pathlib import Path
 from tempfile import TemporaryDirectory
+from types import SimpleNamespace
 
 import pytest
 
@@ -19,8 +21,9 @@ from nist_fingerprint_comparator.core.models import BiometricImage, NistTransact
 from nist_fingerprint_comparator.core.review import DecisionHistoryStore
 from nist_fingerprint_comparator.logging_config import SanitizingLogFilter
 from nist_fingerprint_comparator.ui.main_window import MainWindow
-from nist_fingerprint_comparator.ui.settings import AppSettings
+from nist_fingerprint_comparator.ui.settings import HISTORY_DATABASE_FILENAME, AppSettings
 from nist_fingerprint_comparator.ui.worker import ArchiveWorker, ParseWorker
+from nist_fingerprint_comparator.user_data import USER_DATA_ROOT_ENV
 
 
 def _window(tmp_path: Path) -> MainWindow:
@@ -188,3 +191,90 @@ def test_log_sanitizer_omits_bytes_paths_and_encoded_data() -> None:
     assert "person.nist" not in sanitized
     assert secret not in sanitized
     assert record.getMessage() == "<bytes omitted>"
+
+
+def test_loading_log_details_omit_source_filename() -> None:
+    error = LoadingError(
+        "Record could not be loaded",
+        "The selected record could not be loaded.",
+        stage="nist_parsing",
+        source_name="case-person-identifier.nist",
+        original_exception_type="PermissionError",
+    )
+
+    assert "case-person-identifier.nist" in error.technical_details
+    assert "case-person-identifier.nist" not in error.log_details
+    assert "PermissionError" in error.log_details
+
+
+def test_corrupt_history_does_not_crash_main_window_startup(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    application = QApplication.instance() or QApplication([])
+    root = tmp_path / "user-data"
+    history_path = root / "history" / HISTORY_DATABASE_FILENAME
+    history_path.parent.mkdir(parents=True)
+    history_path.write_bytes(b"corrupt history")
+    monkeypatch.setenv(USER_DATA_ROOT_ENV, str(root))
+    monkeypatch.setattr(
+        "nist_fingerprint_comparator.ui.main_window.QTimer.singleShot",
+        lambda *_args: None,
+    )
+    settings = AppSettings(
+        QSettings(str(root / "config" / "settings.ini"), QSettings.Format.IniFormat)
+    )
+
+    window = MainWindow(settings=settings)
+
+    assert window._history_store is None
+    assert not window.view_history_action.isEnabled()
+    window.close()
+    application.processEvents()
+
+
+def test_history_write_failure_keeps_decision_unsaved_and_explains_problem(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    application = QApplication.instance() or QApplication([])
+    window = _window(tmp_path)
+    file_a = NistTransaction(source_path=tmp_path / "a.nist")
+    file_b = NistTransaction(source_path=tmp_path / "b.nist")
+    window._file_b = file_b
+    window._review_queue.start(file_a, [file_b.source_path])
+    window._history_store = SimpleNamespace(
+        replace=lambda *_args: (_ for _ in ()).throw(sqlite3.OperationalError("locked"))
+    )
+    messages: list[tuple[str, str]] = []
+    monkeypatch.setattr(
+        QMessageBox,
+        "critical",
+        lambda _parent, title, message: messages.append((title, message)),
+    )
+
+    window._record_decision("MATCH")
+
+    assert window._review_queue.decisions == []
+    assert messages == [
+        (
+            "Decision not saved",
+            "History is unavailable. The decision was not saved.",
+        )
+    ]
+    window.close()
+    application.processEvents()
+
+
+def test_window_close_cleans_archive_temporary_directory(tmp_path: Path) -> None:
+    application = QApplication.instance() or QApplication([])
+    window = _window(tmp_path)
+    archive_temp = TemporaryDirectory(dir=tmp_path)
+    archive_temp_path = Path(archive_temp.name)
+    (archive_temp_path / "record.nist").write_bytes(b"temporary")
+    window._archive_temp_directory = archive_temp
+
+    window.close()
+    application.processEvents()
+
+    assert not archive_temp_path.exists()

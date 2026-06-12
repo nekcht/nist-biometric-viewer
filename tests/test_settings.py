@@ -1,6 +1,7 @@
 import re
 from pathlib import Path
 
+import pytest
 from PySide6.QtCore import QSettings
 
 from nist_fingerprint_comparator.core.models import NistTransaction
@@ -111,6 +112,16 @@ def test_session_export_prompt_defaults_on_and_is_persisted(tmp_path: Path) -> N
     assert not settings.offer_session_export()
 
 
+def test_auto_end_session_defaults_off_and_is_persisted(tmp_path: Path) -> None:
+    settings = AppSettings(QSettings(str(tmp_path / "settings.ini"), QSettings.Format.IniFormat))
+
+    assert not settings.auto_end_session()
+
+    settings.set_auto_end_session(True)
+
+    assert settings.auto_end_session()
+
+
 def test_history_timezone_is_persisted_and_used_for_recorded_timestamp(tmp_path: Path) -> None:
     qsettings = QSettings(str(tmp_path / "settings.ini"), QSettings.Format.IniFormat)
     settings = AppSettings(qsettings)
@@ -122,3 +133,20 @@ def test_history_timezone_is_persisted_and_used_for_recorded_timestamp(tmp_path:
     assert timezone_id == "UTC"
     assert re.fullmatch(r"\d{2}:\d{2} \d{2}-\d{2}-\d{4}", timestamp)
     assert timestamp_utc.endswith("+00:00")
+
+
+def test_settings_write_failure_is_reported() -> None:
+    class UnavailableSettings:
+        def setValue(self, *_args) -> None:  # noqa: N802
+            pass
+
+        def sync(self) -> None:
+            pass
+
+        def status(self):
+            return QSettings.Status.AccessError
+
+    settings = AppSettings(UnavailableSettings())  # type: ignore[arg-type]
+
+    with pytest.raises(OSError, match="unavailable"):
+        settings.set_offer_session_export(False)

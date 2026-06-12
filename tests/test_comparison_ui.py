@@ -31,7 +31,10 @@ from nist_fingerprint_comparator.ui.archive_reference_dialog import (
 from nist_fingerprint_comparator.ui.comparison_grid import ComparisonGrid
 from nist_fingerprint_comparator.ui.export_dialog import ExportHistoryDialog
 from nist_fingerprint_comparator.ui.fingerprint_card import FingerprintCard
-from nist_fingerprint_comparator.ui.history_dialog import DecisionHistoryDialog
+from nist_fingerprint_comparator.ui.history_dialog import (
+    HISTORY_PAGE_SIZE,
+    DecisionHistoryDialog,
+)
 from nist_fingerprint_comparator.ui.image_viewer import ImageViewer
 from nist_fingerprint_comparator.ui.main_window import MainWindow
 from nist_fingerprint_comparator.ui.resources import application_icon_path
@@ -58,6 +61,20 @@ def _image(code: str) -> BiometricImage:
         hand=hand,  # type: ignore[arg-type]
         decode_status="unsupported",
     )
+
+
+def _history_row(index: int) -> dict[str, str]:
+    return {
+        "history_id": str(index),
+        "timestamp_utc": f"2026-06-10T12:{index:02}:00+00:00",
+        "timestamp": f"12:{index:02} 10-06-2026",
+        "timezone": "UTC",
+        "decision": "MATCH",
+        "file_a_name": "reference.nist",
+        "file_b_name": f"comparison-{index}.nist",
+        "file_a_reference_number": "REF",
+        "file_b_reference_number": f"CMP-{index}",
+    }
 
 
 def test_ui_renders_every_impression_as_a_cross_file_row() -> None:
@@ -185,7 +202,29 @@ def test_main_window_pass_completes_without_saving_or_ending_session(tmp_path) -
     assert window._review_queue.is_complete
     assert window._file_a is file_a
     assert window._file_b is file_b
+    assert window.review_progress_bar.value() == 1
+    assert window.review_progress_bar.property("complete") is True
     assert "Use End Session" in window.statusBar().currentMessage()
+    window.close()
+    application.processEvents()
+
+
+def test_pass_counts_toward_incomplete_session_progress(tmp_path) -> None:
+    application = QApplication.instance() or QApplication([])
+    file_a = NistTransaction(source_path=tmp_path / "a.nist")
+    file_b1 = NistTransaction(source_path=tmp_path / "b1.nist")
+    file_b2 = NistTransaction(source_path=tmp_path / "b2.nist")
+    window = _window(tmp_path)
+    window._file_a = file_a
+    window._file_b = file_b1
+    window._review_queue.start(file_a, [file_b1.source_path, file_b2.source_path])
+    window._start_processing = lambda *_args: None
+
+    window._record_decision("PASS")
+
+    assert window.review_progress_bar.maximum() == 2
+    assert window.review_progress_bar.value() == 1
+    assert window.review_progress_bar.property("complete") is False
     window.close()
     application.processEvents()
 
@@ -639,6 +678,27 @@ def test_setup_dialog_uses_source_then_reference_phases(tmp_path) -> None:
     application.processEvents()
 
 
+def test_setup_dialog_requires_explicit_reference_appointment(tmp_path) -> None:
+    application = QApplication.instance() or QApplication([])
+    paths = [tmp_path / "one.nist", tmp_path / "two.nist"]
+    dialog = ComparisonSetupDialog(tmp_path)
+    dialog.set_record_selection(paths)
+    dialog._go_next()
+
+    dialog.reference_list.setCurrentRow(0)
+
+    assert dialog.reference_list.currentRow() == 0
+    assert dialog.file_a_path is None
+    assert not dialog.reference_next_button.isEnabled()
+
+    dialog.reference_list.itemClicked.emit(dialog.reference_list.item(0))
+
+    assert dialog.file_a_path == paths[0]
+    assert dialog.reference_next_button.isEnabled()
+    dialog.close()
+    application.processEvents()
+
+
 def test_initial_screen_accepts_supported_drop_and_opens_setup(tmp_path) -> None:
     application = QApplication.instance() or QApplication([])
     paths = [tmp_path / "one.nist", tmp_path / "two.nist"]
@@ -728,6 +788,28 @@ def test_archive_reference_dialog_selects_reference_record(tmp_path) -> None:
     assert dialog.findChild(QLabel, "referenceGuidance").text() == (
         "Select the Reference Record. All other records will be compared against it."
     )
+    dialog.close()
+    application.processEvents()
+
+
+def test_archive_reference_dialog_requires_explicit_reference_appointment(tmp_path) -> None:
+    application = QApplication.instance() or QApplication([])
+    paths = [tmp_path / "first.nist", tmp_path / "second.nist"]
+    dialog = ArchiveReferenceDialog(paths)
+    next_button = next(
+        button for button in dialog.findChildren(QPushButton) if button.text() == "Next"
+    )
+
+    dialog.record_list.setCurrentRow(0)
+
+    assert dialog.record_list.currentRow() == 0
+    assert dialog.reference_path is None
+    assert not next_button.isEnabled()
+
+    dialog.record_list.itemClicked.emit(dialog.record_list.item(0))
+
+    assert dialog.reference_path == paths[0]
+    assert next_button.isEnabled()
     dialog.close()
     application.processEvents()
 
@@ -888,6 +970,7 @@ def test_decision_button_selection_uses_clean_filled_highlight() -> None:
     assert "QPushButton#matchButton:checked" in APP_STYLESHEET
     assert "QPushButton#noMatchButton:checked" in APP_STYLESHEET
     assert "QPushButton#passButton:checked" in APP_STYLESHEET
+    assert 'QProgressBar#reviewProgressBar[complete="true"]::chunk' in APP_STYLESHEET
     assert "border: 3px solid" not in APP_STYLESHEET
 
 
@@ -915,6 +998,87 @@ def test_all_decisions_keep_session_open_without_prompt(tmp_path, monkeypatch) -
     assert window._file_b is file_b
     assert window.match_button.isChecked()
     assert "Use End Session" in window.statusBar().currentMessage()
+    window.close()
+    application.processEvents()
+
+
+def test_auto_end_session_after_last_pending_pair_is_decided(tmp_path, monkeypatch) -> None:
+    application = QApplication.instance() or QApplication([])
+    file_a = NistTransaction(source_path=tmp_path / "a.nist")
+    candidates = [
+        NistTransaction(source_path=tmp_path / f"b{index}.nist")
+        for index in range(1, 4)
+    ]
+    window = _window(tmp_path)
+    window._settings.set_auto_end_session(True)
+    window._settings.set_offer_session_export(False)
+    window._file_a = file_a
+    window._review_queue.start(
+        file_a,
+        [candidate.source_path for candidate in candidates],
+    )
+    for index in (0, 2):
+        window._review_queue.set_current_index(index)
+        prior, _ = window._review_queue.set_decision("MATCH", candidates[index])
+        window._history_store.append(prior)
+    window._review_queue.set_current_index(1)
+    window._file_b = candidates[1]
+    window._candidate_ready = True
+    messages: list[tuple[str, str]] = []
+    monkeypatch.setattr(
+        QMessageBox,
+        "information",
+        lambda _parent, title, message: messages.append((title, message)),
+    )
+
+    window._record_decision("NO_MATCH")
+
+    assert messages == [
+        (
+            "Session completed",
+            "All comparison pairs have a decision. The session ended automatically.",
+        )
+    ]
+    assert window._history_store.count() == 3
+    assert window.page_stack.currentWidget() is window.setup_page
+    assert window._review_queue.candidate_paths == []
+    assert "Session ended" in window.statusBar().currentMessage()
+    window.close()
+    application.processEvents()
+
+
+def test_auto_end_notice_appears_before_export_prompt(tmp_path, monkeypatch) -> None:
+    application = QApplication.instance() or QApplication([])
+    file_a = NistTransaction(source_path=tmp_path / "a.nist")
+    file_b = NistTransaction(source_path=tmp_path / "b.nist")
+    window = _window(tmp_path)
+    window._settings.set_auto_end_session(True)
+    window._file_a = file_a
+    window._file_b = file_b
+    window._review_queue.start(file_a, [file_b.source_path])
+    window._candidate_ready = True
+    prompts: list[tuple[str, str]] = []
+    monkeypatch.setattr(
+        QMessageBox,
+        "information",
+        lambda _parent, title, message: prompts.append((title, message)),
+    )
+    monkeypatch.setattr(
+        QMessageBox,
+        "question",
+        lambda _parent, title, message, *_args: prompts.append((title, message))
+        or QMessageBox.StandardButton.No,
+    )
+
+    window._record_decision("MATCH")
+
+    assert prompts == [
+        (
+            "Session completed",
+            "All comparison pairs have a decision. The session ended automatically.",
+        ),
+        ("Export session results", "Export completed results to XLSX?"),
+    ]
     window.close()
     application.processEvents()
 
@@ -1136,6 +1300,45 @@ def test_history_dialog_displays_current_database_records(tmp_path) -> None:
     application.processEvents()
 
 
+def test_history_dialog_paginates_only_when_more_than_fifty_records_exist() -> None:
+    application = QApplication.instance() or QApplication([])
+    rows = [_history_row(index) for index in range(HISTORY_PAGE_SIZE + 1)]
+    page_requests: list[tuple[int, int]] = []
+
+    def load_page(offset: int, limit: int) -> list[dict[str, str]]:
+        page_requests.append((offset, limit))
+        return rows[offset : offset + limit]
+
+    dialog = DecisionHistoryDialog(
+        rows[:HISTORY_PAGE_SIZE],
+        total_count=len(rows),
+        load_page=load_page,
+    )
+
+    assert dialog.table.rowCount() == HISTORY_PAGE_SIZE
+    assert dialog.table.item(0, 4).text() == "comparison-0.nist"
+    assert not dialog.previous_page_button.isHidden()
+    assert not dialog.next_page_button.isHidden()
+    assert dialog.page_label.text() == "Page 1 of 2"
+    assert page_requests == []
+
+    dialog.next_page_button.click()
+
+    assert page_requests == [(HISTORY_PAGE_SIZE, HISTORY_PAGE_SIZE)]
+    assert dialog.table.rowCount() == 1
+    assert dialog.table.item(0, 4).text() == f"comparison-{HISTORY_PAGE_SIZE}.nist"
+    assert dialog.page_label.text() == "Page 2 of 2"
+    assert not dialog.next_page_button.isEnabled()
+    dialog.close()
+
+    one_page_dialog = DecisionHistoryDialog(rows[:HISTORY_PAGE_SIZE])
+    assert one_page_dialog.previous_page_button.isHidden()
+    assert one_page_dialog.next_page_button.isHidden()
+    assert one_page_dialog.page_label.isHidden()
+    one_page_dialog.close()
+    application.processEvents()
+
+
 def test_history_dialog_exports_only_through_its_export_button(tmp_path) -> None:
     application = QApplication.instance() or QApplication([])
     window = _window(tmp_path)
@@ -1191,8 +1394,8 @@ def test_history_dialog_can_delete_selected_row_and_detach_active_decision(
     assert dialog.table.rowCount() == 1
     assert dialog.summary_label.text() == "1 decision"
     assert window._history_store.count() == 1
-    assert first.history_id is None
-    assert second.history_id is not None
+    assert first.history_id is not None
+    assert second.history_id is None
     assert window.statusBar().currentMessage() == "History record deleted"
     dialog.close()
     window.close()
@@ -1284,14 +1487,17 @@ def test_export_dialog_uses_settings_timezone_and_returns_utc_range() -> None:
 
 def test_settings_dialog_lists_and_selects_history_timezone() -> None:
     application = QApplication.instance() or QApplication([])
-    dialog = SettingsDialog("UTC", False)
+    dialog = SettingsDialog("UTC", False, True)
 
     assert dialog.history_timezone_id == "UTC"
     assert dialog.timezone_combo.count() > 1
     assert dialog.windowTitle() == "Settings"
     assert not dialog.offer_session_export
+    assert dialog.auto_end_session
     dialog.offer_session_export_checkbox.setChecked(True)
+    dialog.auto_end_session_checkbox.setChecked(False)
     assert dialog.offer_session_export
+    assert not dialog.auto_end_session
     dialog.close()
     application.processEvents()
 

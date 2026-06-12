@@ -63,6 +63,20 @@ QProgressBar#loadingProgress::chunk {
     background: #536f8a;
     border-radius: 4px;
 }
+QProgressBar#reviewProgressBar {
+    background: #e0e5ea;
+    border: 1px solid #c8d0d8;
+    border-radius: 5px;
+    min-height: 12px;
+    max-height: 12px;
+}
+QProgressBar#reviewProgressBar::chunk {
+    background: #536f8a;
+    border-radius: 4px;
+}
+QProgressBar#reviewProgressBar[complete="true"]::chunk {
+    background: #287a4b;
+}
 QLabel#reviewProgress {
     color: #34404c;
     font-size: 11pt;

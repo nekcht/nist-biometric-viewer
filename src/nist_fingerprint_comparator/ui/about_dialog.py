@@ -4,19 +4,18 @@ from __future__ import annotations
 
 from PySide6.QtCore import Qt
 from PySide6.QtGui import QPixmap
-from PySide6.QtWidgets import QDialog, QDialogButtonBox, QHBoxLayout, QLabel, QVBoxLayout
+from PySide6.QtWidgets import QDialog, QHBoxLayout, QLabel, QVBoxLayout
 
 from nist_fingerprint_comparator import __version__
 
 from .resources import application_icon_path
 
 ABOUT_TEXT = (
-    "<p>Visual review of ANSI/NIST biometric records.</p>"
+    "<p>Visual review only for ANSI/NIST biometric records.</p>"
     f"<p><b>Version</b><br>{__version__}</p>"
-    "<p><b>Developed by</b><br>"
-    "Nektarios Christou"
+    "<p><b>Developed by</b><br>Nektarios Christou<br>Hellenic Police</p>"
     "<p><b>Contact</b><br>"
-    '<a href="mailto:nekcht@gmail.com">nekcht@gmail.com</a><br>'
+    '<a href="mailto:n.christou@police.gr">n.christou@police.gr</a><br>'
     '<a href="https://github.com/nekcht">github.com/nekcht</a></p>'
 )
 
@@ -50,6 +49,11 @@ class AboutDialog(QDialog):
         header.addSpacing(12)
         header.addWidget(title, 1, Qt.AlignmentFlag.AlignVCenter)
         layout.addLayout(header)
+
+        heading = QLabel("About")
+        heading.setObjectName("aboutHeading")
+        heading.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        layout.addWidget(heading)
 
         self.details_label = QLabel(ABOUT_TEXT)
         self.details_label.setTextFormat(Qt.TextFormat.RichText)

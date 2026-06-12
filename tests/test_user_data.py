@@ -1,8 +1,16 @@
+import json
 from pathlib import Path
 
+import pytest
+
+import nist_fingerprint_comparator.user_data as user_data
 from nist_fingerprint_comparator.user_data import (
     APP_DATA_DIRECTORY_NAME,
+    TEMP_SESSION_MARKER,
+    TEMP_SESSION_PREFIX,
     USER_DATA_ROOT_ENV,
+    cleanup_stale_temp_dirs,
+    create_archive_temp_directory,
     ensure_user_data_dirs,
     get_config_dir,
     get_exports_dir,
@@ -45,6 +53,108 @@ def test_ensure_user_data_dirs_is_idempotent(tmp_path: Path, monkeypatch) -> Non
     assert all(path.is_dir() for path in first)
 
 
+def test_archive_temp_directory_is_per_user_marked_and_self_cleaning(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    root = tmp_path / "user-data"
+    monkeypatch.setenv(USER_DATA_ROOT_ENV, str(root))
+
+    temporary_directory = create_archive_temp_directory()
+    session_root = Path(temporary_directory.name)
+
+    assert session_root.parent == root / "temp"
+    assert (session_root / TEMP_SESSION_MARKER).is_file()
+    assert (session_root / "contents").is_dir()
+
+    temporary_directory.cleanup()
+
+    assert not session_root.exists()
+
+
+def test_stale_temp_cleanup_removes_only_old_marked_app_sessions(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    root = tmp_path / "user-data"
+    monkeypatch.setenv(USER_DATA_ROOT_ENV, str(root))
+    ensure_user_data_dirs()
+    stale = get_temp_dir() / f"{TEMP_SESSION_PREFIX}stale"
+    active = get_temp_dir() / f"{TEMP_SESSION_PREFIX}active"
+    unknown = get_temp_dir() / "unrelated"
+    for directory in (stale, active, unknown):
+        directory.mkdir()
+    (stale / TEMP_SESSION_MARKER).write_text(
+        json.dumps({"pid": 10, "created": 0}),
+        encoding="ascii",
+    )
+    (active / TEMP_SESSION_MARKER).write_text(
+        json.dumps({"pid": 20, "created": 0}),
+        encoding="ascii",
+    )
+    monkeypatch.setattr(user_data, "_process_is_running", lambda pid: pid == 20)
+
+    cleaned, failed = cleanup_stale_temp_dirs(now=100, maximum_age_seconds=10)
+
+    assert cleaned == [stale]
+    assert failed == []
+    assert not stale.exists()
+    assert active.exists()
+    assert unknown.exists()
+
+
+def test_stale_temp_cleanup_failure_is_non_fatal(tmp_path: Path, monkeypatch) -> None:
+    root = tmp_path / "user-data"
+    monkeypatch.setenv(USER_DATA_ROOT_ENV, str(root))
+    ensure_user_data_dirs()
+    stale = get_temp_dir() / f"{TEMP_SESSION_PREFIX}stale"
+    stale.mkdir()
+    (stale / TEMP_SESSION_MARKER).write_text(
+        json.dumps({"pid": 10, "created": 0}),
+        encoding="ascii",
+    )
+    monkeypatch.setattr(user_data, "_process_is_running", lambda _pid: False)
+    monkeypatch.setattr(
+        user_data.shutil,
+        "rmtree",
+        lambda _path: (_ for _ in ()).throw(PermissionError("locked")),
+    )
+
+    cleaned, failed = cleanup_stale_temp_dirs(now=100, maximum_age_seconds=10)
+
+    assert cleaned == []
+    assert failed == [stale]
+    assert stale.exists()
+
+
+def test_user_data_folder_write_failure_is_reported(tmp_path: Path, monkeypatch) -> None:
+    monkeypatch.setenv(USER_DATA_ROOT_ENV, str(tmp_path / "user-data"))
+    monkeypatch.setattr(
+        user_data.tempfile,
+        "NamedTemporaryFile",
+        lambda **_kwargs: (_ for _ in ()).throw(PermissionError("denied")),
+    )
+
+    with pytest.raises(PermissionError):
+        ensure_user_data_dirs()
+
+
+def test_runtime_data_creation_does_not_write_to_working_directory(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    working_directory = tmp_path / "installed-app"
+    working_directory.mkdir()
+    monkeypatch.chdir(working_directory)
+    monkeypatch.setenv(USER_DATA_ROOT_ENV, str(tmp_path / "user-data"))
+
+    ensure_user_data_dirs()
+    temporary_directory = create_archive_temp_directory()
+    temporary_directory.cleanup()
+
+    assert list(working_directory.iterdir()) == []
+
+
 def test_default_files_do_not_overwrite_existing_config(tmp_path: Path, monkeypatch) -> None:
     root = tmp_path / "user-data"
     defaults = tmp_path / "defaults"
@@ -61,6 +171,29 @@ def test_default_files_do_not_overwrite_existing_config(tmp_path: Path, monkeypa
     assert installed == [settings]
     assert installed_again == []
     assert settings.read_text(encoding="utf-8") == "user setting"
+
+
+def test_failed_default_file_copy_removes_partial_destination(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    root = tmp_path / "user-data"
+    defaults = tmp_path / "defaults"
+    source = defaults / "config" / "settings.ini"
+    source.parent.mkdir(parents=True)
+    source.write_text("installer default", encoding="utf-8")
+    monkeypatch.setenv(USER_DATA_ROOT_ENV, str(root))
+
+    def fail_copy(_source, destination) -> None:
+        destination.write(b"partial")
+        raise OSError("disk full")
+
+    monkeypatch.setattr(user_data.shutil, "copyfileobj", fail_copy)
+
+    with pytest.raises(OSError):
+        install_default_user_files(defaults)
+
+    assert not (root / "config" / "settings.ini").exists()
 
 
 def test_default_user_files_include_no_biometric_or_evidence_samples() -> None:

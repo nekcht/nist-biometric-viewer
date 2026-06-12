@@ -19,6 +19,7 @@ class SettingsDialog(QDialog):
         self,
         history_timezone_id: str,
         offer_session_export: bool = True,
+        auto_end_session: bool = False,
         parent=None,
     ) -> None:
         super().__init__(parent)
@@ -26,7 +27,7 @@ class SettingsDialog(QDialog):
         self.setMinimumWidth(520)
 
         layout = QVBoxLayout(self)
-        guidance = QLabel("Set the timezone shown for new History entries.")
+        guidance = QLabel("Configure History and session behavior.")
         guidance.setWordWrap(True)
         layout.addWidget(guidance)
 
@@ -53,6 +54,13 @@ class SettingsDialog(QDialog):
         self.offer_session_export_checkbox.setCursor(Qt.CursorShape.PointingHandCursor)
         layout.addWidget(self.offer_session_export_checkbox)
 
+        self.auto_end_session_checkbox = QCheckBox(
+            "Automatically end the session when all pairs have a decision"
+        )
+        self.auto_end_session_checkbox.setChecked(auto_end_session)
+        self.auto_end_session_checkbox.setCursor(Qt.CursorShape.PointingHandCursor)
+        layout.addWidget(self.auto_end_session_checkbox)
+
         buttons = QDialogButtonBox(
             QDialogButtonBox.StandardButton.Cancel | QDialogButtonBox.StandardButton.Ok
         )
@@ -68,3 +76,7 @@ class SettingsDialog(QDialog):
     @property
     def offer_session_export(self) -> bool:
         return self.offer_session_export_checkbox.isChecked()
+
+    @property
+    def auto_end_session(self) -> bool:
+        return self.auto_end_session_checkbox.isChecked()

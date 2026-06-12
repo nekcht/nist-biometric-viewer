@@ -62,6 +62,20 @@ class LoadingError(NistComparatorError):
             details.append(self.technical_message)
         return "\n".join(details)
 
+    @property
+    def log_details(self) -> str:
+        """Return diagnostics that omit source filenames and other case identifiers."""
+        details = [f"Stage: {self.stage}"]
+        if self.original_exception_type:
+            details.append(f"Reason: {self.original_exception_type}")
+        if self.technical_message:
+            details.append(self.technical_message)
+        return "\n".join(details)
+
+
+class LoadingCancelled(Exception):
+    """Internal cooperative-cancellation signal for background loading."""
+
 
 def loading_error_from_exception(
     exception: Exception,
