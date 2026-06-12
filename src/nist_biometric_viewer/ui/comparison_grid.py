@@ -176,15 +176,11 @@ class ComparisonGrid(QScrollArea):
         if transaction is None:
             filename = "Not loaded"
             reference_number = "Not available"
-            summary = "Records: 0 | Biometric images: 0 | Warnings: 0"
+            summary = "Compatibility: Not loaded | Records: 0 | Supported images: 0"
         else:
             filename = transaction.source_path.name
             reference_number = transaction.reference_number or "Not available"
-            summary = (
-                f"Records: {len(transaction.records)} | "
-                f"Biometric images: {len(transaction.biometric_images)} | "
-                f"Warnings: {len(transaction.warnings)}"
-            )
+            summary = transaction.compatibility_summary.compact_text()
         filename_label = QLabel(filename)
         filename_label.setObjectName("recordHeaderFilename")
         filename_label.setWordWrap(True)

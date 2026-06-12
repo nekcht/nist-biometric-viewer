@@ -26,9 +26,10 @@ Decoded image formats:
 - JPEG2000 when supported by Pillow
 - WSQ when the WSQ plugin is available
 
-ANSI/NIST versions and agency profiles vary. Unsupported or malformed records may appear
-as warnings. ZIP archives are supported; RAR archives require a compatible extraction
-backend.
+The app supports common ANSI/NIST biometric image records, mainly Type-13, Type-14, and
+Type-15, with partial best-effort Type-4 support. ANSI/NIST versions and agency profiles
+vary, so unsupported records or fields may appear as warnings. ZIP archives are supported;
+RAR archives require a compatible extraction backend.
 
 ## Run From Source
 

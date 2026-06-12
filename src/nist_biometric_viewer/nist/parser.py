@@ -40,6 +40,7 @@ class NistParser:
         transaction = NistTransaction(source_path=Path(source_path))
         if not data:
             transaction.warnings.append("Selected record is empty.")
+            transaction.inspection_failed = True
             return transaction
 
         for start, end, raw_record, split_warning in self._iter_records(data):
@@ -62,7 +63,10 @@ class NistParser:
             self._collect_record(transaction, record, raw_record)
 
         if not transaction.records:
-            transaction.warnings.append("Unsupported record.")
+            transaction.inspection_failed = True
+            transaction.warnings.append("No records could be inspected.")
+        elif not transaction.biometric_images:
+            transaction.warnings.append("No supported biometric images found.")
         return transaction
 
     def _iter_records(self, data: bytes):
@@ -94,7 +98,7 @@ class NistParser:
 
             separator = data.find(bytes([FS]), offset)
             end = size if separator < 0 else separator + 1
-            warning = "Record boundary inferred; length unavailable."
+            warning = "Record boundary inferred."
             yield offset, end, data[offset:end], warning
             offset = end
 
@@ -128,15 +132,17 @@ class NistParser:
             return NistRecord(
                 record_type=0,
                 length=len(raw),
+                support_status="unsupported",
                 raw_start_offset=start,
                 raw_end_offset=end,
                 warnings=["Record type unavailable."],
             )
 
-        if record.record_type not in SUPPORTED_RECORD_TYPES:
-            record.warnings.append(
-                f"Unsupported record type: Type-{record.record_type}."
-            )
+        if record.record_type == 4:
+            record.support_status = "partial"
+        elif record.record_type not in SUPPORTED_RECORD_TYPES:
+            record.support_status = "unsupported"
+            record.warnings.append(f"Unsupported Type-{record.record_type} record.")
         return record
 
     def _parse_tagged_fields(
@@ -166,7 +172,7 @@ class NistParser:
                 payload = payload[:-1]
             fields[f"{record_type}.999"] = payload
             if not payload:
-                warnings.append(f"Type-{record_type} image data is empty.")
+                warnings.append("Image data missing.")
         return fields, warnings
 
     def _collect_record(
@@ -188,7 +194,7 @@ class NistParser:
             transaction.biometric_images.append(biometric_from_binary_type4(record, raw_record))
 
         for warning in record.warnings:
-            transaction.warnings.append(f"Type-{record_type}: {warning}")
+            transaction.warnings.append(_transaction_warning(record_type, warning))
 
     @staticmethod
     def _looks_like_binary_type4(data: bytes, offset: int) -> bool:
@@ -220,3 +226,9 @@ def _safe_int(value: str | None) -> int | None:
         return int(value) if value is not None else None
     except ValueError:
         return None
+
+
+def _transaction_warning(record_type: int, warning: str) -> str:
+    if record_type <= 0 or warning.startswith("Unsupported Type-"):
+        return warning
+    return f"Type-{record_type}: {warning}"

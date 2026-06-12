@@ -448,7 +448,7 @@ class MainWindow(QMainWindow):
         layout = QVBoxLayout(group)
         file_label = QLabel("Not loaded")
         file_label.setWordWrap(True)
-        summary_label = QLabel("Records: 0\nBiometric images: 0\nWarnings: 0")
+        summary_label = QLabel("Compatibility: Not loaded\nRecords: 0\nSupported images: 0")
         metadata = MetadataPanel()
         metadata.setMaximumHeight(190)
         metadata.hide()
@@ -730,14 +730,16 @@ class MainWindow(QMainWindow):
         assert isinstance(metadata, MetadataPanel)
         assert isinstance(warnings, QPlainTextEdit)
         file_label.setText(transaction.source_path.name)
-        summary_label.setText(
-            f"Records: {len(transaction.records)}\n"
-            f"Biometric images: {len(transaction.biometric_images)}\n"
-            f"Warnings: {len(transaction.warnings)}"
-        )
+        summary = transaction.compatibility_summary
+        summary_label.setText(summary.compact_text(separator="\n"))
         rows = [
+            ("Compatibility", summary.status),
             ("Version", transaction.version),
             ("Transaction type", transaction.transaction_type),
+            ("Supported biometric images", summary.supported_biometric_image_records),
+            ("Unsupported records", summary.unsupported_records_text),
+            ("Partial support", summary.partial_records_text),
+            ("Warnings", summary.warning_count),
             *sorted(transaction.transaction_metadata.items()),
         ]
         metadata.set_rows(rows)
@@ -1220,7 +1222,7 @@ class MainWindow(QMainWindow):
         assert isinstance(metadata, MetadataPanel)
         assert isinstance(warnings, QPlainTextEdit)
         file_label.setText("Not loaded")
-        summary_label.setText("Records: 0\nBiometric images: 0\nWarnings: 0")
+        summary_label.setText("Compatibility: Not loaded\nRecords: 0\nSupported images: 0")
         metadata.set_rows([])
         warnings.clear()
 

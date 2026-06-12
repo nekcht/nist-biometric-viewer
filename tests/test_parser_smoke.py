@@ -1,5 +1,10 @@
+import logging
+from io import BytesIO
 from pathlib import Path
 
+from PIL import Image
+
+from nist_biometric_viewer.imaging.decoder import ImageDecoder
 from nist_biometric_viewer.nist.parser import NistParser
 from nist_biometric_viewer.nist.separators import FS_BYTES, GS_BYTES
 
@@ -13,6 +18,12 @@ def _tagged_record(record_type: int, fields: list[tuple[str, bytes]]) -> bytes:
         if len(record) == length:
             return record
         length = len(record)
+
+
+def _png_bytes() -> bytes:
+    output = BytesIO()
+    Image.new("L", (1, 1), 0).save(output, format="PNG")
+    return output.getvalue()
 
 
 def test_parser_smoke_with_minimal_tagged_records() -> None:
@@ -57,6 +68,14 @@ def test_parser_smoke_with_minimal_tagged_records() -> None:
     assert image.resolution_ppi == 500
     assert image.image_bytes.startswith(b"\x89PNG")
     assert b"\x1cinside-payload" in image.image_bytes
+    summary = transaction.compatibility_summary
+    assert summary.status == "Compatible"
+    assert summary.version == "0500"
+    assert summary.transaction_type == "CAR"
+    assert summary.total_records == 3
+    assert summary.supported_biometric_image_records == 1
+    assert summary.unsupported_record_count == 0
+    assert summary.warning_count == 0
 
 
 def test_parser_returns_warnings_for_unrecognized_data() -> None:
@@ -65,6 +84,9 @@ def test_parser_returns_warnings_for_unrecognized_data() -> None:
     assert len(transaction.records) == 1
     assert transaction.records[0].record_type == 0
     assert transaction.warnings
+    assert transaction.compatibility_summary.status == "Unsupported"
+    assert transaction.compatibility_summary.unsupported_record_count == 1
+    assert "No supported biometric images found." in transaction.warnings
 
 
 def test_parser_extracts_literal_type_2_mn1_user_defined_key() -> None:
@@ -81,6 +103,7 @@ def test_empty_input_is_nonfatal() -> None:
 
     assert transaction.records == []
     assert transaction.warnings == ["Selected record is empty."]
+    assert transaction.compatibility_summary.status == "Failed"
 
 
 def test_legacy_two_digit_type1_fields_are_canonicalized() -> None:
@@ -118,3 +141,102 @@ def test_binary_type4_starting_with_zero_length_bytes_is_parsed() -> None:
     assert image.resolution_ppi == 500
     assert image.compression == "WSQ"
     assert image.image_bytes == payload
+    assert transaction.compatibility_summary.status == "Partial"
+    assert transaction.compatibility_summary.partial_record_types == (4,)
+
+
+def test_unknown_and_missing_type_1_versions_remain_nonfatal() -> None:
+    image = _tagged_record(
+        14,
+        [
+            ("002", b"2"),
+            ("011", b"PNG"),
+            ("013", b"7"),
+            ("999", b"synthetic-image"),
+        ],
+    )
+    unknown_version = NistParser().parse_bytes(
+        _tagged_record(1, [("002", b"9999"), ("004", b"CUSTOM")]) + image
+    )
+    missing_version = NistParser().parse_bytes(
+        _tagged_record(1, [("004", b"CUSTOM")]) + image
+    )
+
+    assert unknown_version.version == "9999"
+    assert unknown_version.compatibility_summary.status == "Compatible"
+    assert missing_version.version is None
+    assert missing_version.compatibility_summary.status == "Compatible"
+
+
+def test_valid_type_14_image_remains_compatible_after_decode() -> None:
+    transaction = NistParser().parse_bytes(
+        _tagged_record(1, [("002", b"0500"), ("004", b"CAR")])
+        + _tagged_record(
+            14,
+            [("002", b"2"), ("011", b"PNG"), ("013", b"7"), ("999", _png_bytes())],
+        )
+    )
+
+    ImageDecoder().decode(transaction.biometric_images[0])
+
+    assert transaction.biometric_images[0].decode_status == "decoded"
+    assert transaction.compatibility_summary.status == "Compatible"
+    assert transaction.compatibility_summary.warning_count == 0
+
+
+def test_unsupported_record_is_visible_retained_and_makes_transaction_partial() -> None:
+    type_1 = _tagged_record(1, [("002", b"0500"), ("004", b"CAR")])
+    type_14 = _tagged_record(14, [("002", b"2"), ("999", b"safe-image")])
+    type_10 = _tagged_record(
+        10,
+        [("002", b"3"), ("003", b"FACE"), ("999", b"RAW-BIOMETRIC-DATA")],
+    )
+
+    transaction = NistParser().parse_bytes(type_1 + type_14 + type_10)
+
+    unsupported = transaction.records[-1]
+    summary = transaction.compatibility_summary
+    assert unsupported.record_type == 10
+    assert unsupported.support_status == "unsupported"
+    assert unsupported.length == len(type_10)
+    assert unsupported.idc == "3"
+    assert unsupported.raw_start_offset is not None
+    assert unsupported.raw_end_offset is not None
+    assert unsupported.warnings == ["Unsupported Type-10 record."]
+    assert summary.status == "Partial"
+    assert summary.unsupported_record_count == 1
+    assert summary.unsupported_record_types == (10,)
+    assert summary.unsupported_records_text == "Type-10"
+    assert "Unsupported Type-10 record." in transaction.warnings
+    assert "RAW-BIOMETRIC-DATA" not in summary.compact_text()
+    assert "RAW-BIOMETRIC-DATA" not in repr(summary)
+
+
+def test_unsupported_only_transaction_reports_unsupported_status() -> None:
+    transaction = NistParser().parse_bytes(
+        _tagged_record(17, [("002", b"4"), ("003", b"unsupported")])
+    )
+
+    summary = transaction.compatibility_summary
+    assert summary.status == "Unsupported"
+    assert summary.supported_biometric_image_records == 0
+    assert summary.unsupported_record_count == 1
+    assert summary.unsupported_record_types == (17,)
+    assert "Unsupported Type-17 record." in transaction.warnings
+    assert "No supported biometric images found." in transaction.warnings
+
+
+def test_parser_failure_summary_and_logs_do_not_expose_raw_input(caplog) -> None:
+    class FailingParser(NistParser):
+        def _parse_record(self, raw: bytes, start: int, end: int):
+            raise ValueError(f"unsafe payload: {raw!r}")
+
+    raw = _tagged_record(14, [("002", b"2"), ("999", b"SECRET-BIOMETRIC-BYTES")])
+
+    with caplog.at_level(logging.WARNING, logger="nist_biometric_viewer.nist.parser"):
+        transaction = FailingParser().parse_bytes(raw)
+
+    assert transaction.compatibility_summary.status == "Failed"
+    assert "SECRET-BIOMETRIC-BYTES" not in transaction.compatibility_summary.compact_text()
+    assert "SECRET-BIOMETRIC-BYTES" not in "\n".join(transaction.warnings)
+    assert "SECRET-BIOMETRIC-BYTES" not in caplog.text

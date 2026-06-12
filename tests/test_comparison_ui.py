@@ -19,7 +19,7 @@ from PySide6.QtWidgets import (
 )
 
 from nist_biometric_viewer import __version__
-from nist_biometric_viewer.core.models import BiometricImage
+from nist_biometric_viewer.core.models import BiometricImage, NistRecord
 from nist_biometric_viewer.core.models import NistTransaction
 from nist_biometric_viewer.core.archive import ArchiveComparisonSelection, ArchiveContents
 from nist_biometric_viewer.core.pairing import build_cross_file_comparison, finger_details
@@ -260,7 +260,7 @@ def test_single_setup_starts_reference_loading_and_uses_internal_history(tmp_pat
     application.processEvents()
 
 
-def test_main_window_has_professional_menus_without_toolbars(tmp_path) -> None:
+def test_main_window_has_menus_without_toolbars(tmp_path) -> None:
     application = QApplication.instance() or QApplication([])
     window = _window(tmp_path)
     assert [action.text() for action in window.menuBar().actions()] == [
@@ -364,6 +364,35 @@ def test_main_workflow_copy_is_concise_and_forensic_neutral(tmp_path) -> None:
 
     window._toggle_metadata(True)
     assert window.statusBar().currentMessage() == "Sensitive metadata visible"
+    window.close()
+    application.processEvents()
+
+
+def test_record_sidebar_shows_compact_compatibility_summary(tmp_path) -> None:
+    application = QApplication.instance() or QApplication([])
+    window = _window(tmp_path)
+    transaction = NistTransaction(
+        source_path=tmp_path / "record.nist",
+        version="0500",
+        transaction_type="CUSTOM",
+        records=[
+            NistRecord(record_type=14),
+            NistRecord(record_type=10, support_status="unsupported"),
+        ],
+        biometric_images=[_image("2")],
+        warnings=["Unsupported Type-10 record."],
+    )
+
+    window._update_file_sidebar(window.file_a_widgets, transaction)
+
+    summary = window.file_a_widgets["summary"].text()
+    assert "Compatibility: Partial" in summary
+    assert "Version: 0500" in summary
+    assert "Transaction: CUSTOM" in summary
+    assert "Supported images: 1" in summary
+    assert "Unsupported: 1 (Type-10)" in summary
+    assert "Warnings: 1" in summary
+    assert "Unsupported Type-10 record." in window.file_a_widgets["warnings"].toPlainText()
     window.close()
     application.processEvents()
 
@@ -1539,10 +1568,12 @@ def test_about_text_contains_developer_details() -> None:
     assert "Office of European Interoperability Applications" not in ABOUT_TEXT
     assert "Hellenic Police Headquarters" not in ABOUT_TEXT
     assert "10/06/2026" not in ABOUT_TEXT
+    assert "Supports common ANSI/NIST biometric image records" in ABOUT_TEXT
+    assert "Versions and agency profiles vary" in ABOUT_TEXT
     assert __version__ in ABOUT_TEXT
 
 
-def test_about_dialog_uses_clickable_professional_contact_details() -> None:
+def test_about_dialog_uses_clickable_contact_details() -> None:
     application = QApplication.instance() or QApplication([])
     dialog = AboutDialog()
 

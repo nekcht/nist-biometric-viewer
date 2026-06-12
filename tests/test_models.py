@@ -64,3 +64,4 @@ def test_model_representations_omit_sensitive_payloads_and_metadata() -> None:
     assert "sensitive-case-name.nist" not in repr(transaction)
     assert "CONTROL-NUMBER" not in repr(transaction)
     assert "REFERENCE-NUMBER" not in repr(transaction)
+    assert "RAW-IMAGE" not in transaction.compatibility_summary.compact_text()

@@ -59,7 +59,7 @@ def prepare_comparison_archive(
     destination: Path,
     should_cancel: Callable[[], bool] | None = None,
 ) -> ArchiveContents:
-    """Extract supported ANSI/NIST records for later user classification."""
+    """Extract recognized ANSI/NIST record files for later user classification."""
     cleanup_destination = False
     try:
         _raise_if_cancelled(should_cancel)
@@ -101,9 +101,9 @@ def prepare_comparison_archive(
 
         if len(nist_paths) < 2:
             raise ComparisonArchiveError(
-                "Archive requires at least two supported ANSI/NIST records.",
+                "Archive requires at least two recognized ANSI/NIST record files.",
                 title="Records required",
-                user_message="The archive must contain at least two supported NIST records.",
+                user_message="The archive must contain at least two ANSI/NIST record files.",
                 stage="archive_validation",
                 source_name=archive_path.name,
             )
@@ -397,9 +397,9 @@ def _validate_member_size(size: int, source_name: str) -> None:
 def _validate_supported_count(supported: int, source_name: str) -> None:
     if supported == 0:
         raise ComparisonArchiveError(
-            "Archive contains no supported NIST records.",
+            "Archive contains no recognized ANSI/NIST record files.",
             title="No records found",
-            user_message="The archive does not contain supported NIST records.",
+            user_message="The archive does not contain recognized ANSI/NIST record files.",
             stage="archive_validation",
             source_name=source_name,
         )

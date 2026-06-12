@@ -115,6 +115,8 @@ def test_decoder_failure_becomes_image_warning(tmp_path: Path, monkeypatch) -> N
     assert errors == []
     assert image.decode_status == "failed"
     assert image.warnings == ["Image decoding failed: RuntimeError."]
+    assert transaction.compatibility_summary.status == "Partial"
+    assert transaction.compatibility_summary.warning_count == 1
 
 
 def test_loading_error_recovery_restores_usable_screen(tmp_path: Path, monkeypatch) -> None:

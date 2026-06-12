@@ -130,10 +130,10 @@ def test_archive_rejects_unsafe_nist_paths(tmp_path: Path) -> None:
     assert not (tmp_path / "reference.nist").exists()
 
 
-def test_archive_requires_at_least_two_supported_records(tmp_path: Path) -> None:
+def test_archive_requires_at_least_two_recognized_record_files(tmp_path: Path) -> None:
     archive = _archive(tmp_path / "records.zip", {"only-one.nist": b"a"})
 
-    with pytest.raises(ComparisonArchiveError, match="at least two supported"):
+    with pytest.raises(ComparisonArchiveError, match="at least two recognized"):
         prepare_comparison_archive(archive, tmp_path / "extracted")
 
 
@@ -161,7 +161,7 @@ def test_archive_without_supported_records_has_controlled_error(tmp_path: Path) 
 
     assert raised.value.title == "No records found"
     assert raised.value.user_message == (
-        "The archive does not contain supported NIST records."
+        "The archive does not contain recognized ANSI/NIST record files."
     )
 
 

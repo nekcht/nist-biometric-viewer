@@ -1,4 +1,4 @@
-"""Professional neutral application stylesheet."""
+"""Neutral application stylesheet."""
 
 APP_STYLESHEET = """
 QMainWindow, QWidget {

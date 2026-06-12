@@ -1,4 +1,4 @@
-"""Professional application and developer information dialog."""
+"""Application and developer information dialog."""
 
 from __future__ import annotations
 
@@ -11,7 +11,8 @@ from nist_biometric_viewer import __version__
 from .resources import application_icon_path
 
 ABOUT_TEXT = (
-    "<p>Visual review only for ANSI/NIST biometric records.</p>"
+    "<p>Visual review only. Supports common ANSI/NIST biometric image records. "
+    "Versions and agency profiles vary; unsupported records may appear as warnings.</p>"
     f"<p><b>Version</b><br>{__version__}</p>"
     "<p><b>Developed by</b><br>Nektarios Christou<br>Hellenic Police</p>"
     "<p><b>Contact</b><br>"
