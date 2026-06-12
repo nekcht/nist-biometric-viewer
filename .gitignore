@@ -13,7 +13,7 @@ env/
 
 # Test, lint, type-check, and coverage artifacts
 .pytest_cache/
-.pytest-tmp*/
+.pytest-*/
 .ruff_cache/
 .mypy_cache/
 .pyright/
