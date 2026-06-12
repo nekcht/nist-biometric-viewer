@@ -2,8 +2,8 @@
 
 from __future__ import annotations
 
-from nist_fingerprint_comparator.core.models import BiometricImage, NistRecord
-from nist_fingerprint_comparator.core.pairing import finger_details
+from nist_biometric_viewer.core.models import BiometricImage, NistRecord
+from nist_biometric_viewer.core.pairing import finger_details
 
 from .constants import COMPRESSION_NAMES
 from .fields import public_metadata, scalar_int, scalar_text

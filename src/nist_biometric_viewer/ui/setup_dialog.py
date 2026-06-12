@@ -21,7 +21,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from nist_fingerprint_comparator.core.loading import (
+from nist_biometric_viewer.core.loading import (
     LoadingError,
     loading_error_from_exception,
     validate_loading_file,

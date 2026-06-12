@@ -17,31 +17,31 @@ from PySide6.QtWidgets import (
     QToolBar,
 )
 
-from nist_fingerprint_comparator import __version__
-from nist_fingerprint_comparator.core.models import BiometricImage
-from nist_fingerprint_comparator.core.models import NistTransaction
-from nist_fingerprint_comparator.core.archive import ArchiveComparisonSelection, ArchiveContents
-from nist_fingerprint_comparator.core.pairing import build_cross_file_comparison, finger_details
-from nist_fingerprint_comparator.core.review import DecisionHistoryStore
-from nist_fingerprint_comparator.ui.about_dialog import ABOUT_TEXT, AboutDialog
-from nist_fingerprint_comparator.ui.archive_reference_dialog import (
+from nist_biometric_viewer import __version__
+from nist_biometric_viewer.core.models import BiometricImage
+from nist_biometric_viewer.core.models import NistTransaction
+from nist_biometric_viewer.core.archive import ArchiveComparisonSelection, ArchiveContents
+from nist_biometric_viewer.core.pairing import build_cross_file_comparison, finger_details
+from nist_biometric_viewer.core.review import DecisionHistoryStore
+from nist_biometric_viewer.ui.about_dialog import ABOUT_TEXT, AboutDialog
+from nist_biometric_viewer.ui.archive_reference_dialog import (
     ArchiveReferenceDialog,
     ReferenceRecordList,
 )
-from nist_fingerprint_comparator.ui.comparison_grid import ComparisonGrid
-from nist_fingerprint_comparator.ui.export_dialog import ExportHistoryDialog
-from nist_fingerprint_comparator.ui.fingerprint_card import FingerprintCard
-from nist_fingerprint_comparator.ui.history_dialog import (
+from nist_biometric_viewer.ui.comparison_grid import ComparisonGrid
+from nist_biometric_viewer.ui.export_dialog import ExportHistoryDialog
+from nist_biometric_viewer.ui.fingerprint_card import FingerprintCard
+from nist_biometric_viewer.ui.history_dialog import (
     HISTORY_PAGE_SIZE,
     DecisionHistoryDialog,
 )
-from nist_fingerprint_comparator.ui.image_viewer import ImageViewer
-from nist_fingerprint_comparator.ui.main_window import MainWindow
-from nist_fingerprint_comparator.ui.resources import application_icon_path
-from nist_fingerprint_comparator.ui.settings import AppSettings
-from nist_fingerprint_comparator.ui.settings_dialog import SettingsDialog
-from nist_fingerprint_comparator.ui.setup_dialog import ComparisonSetupDialog
-from nist_fingerprint_comparator.ui.styles import APP_STYLESHEET
+from nist_biometric_viewer.ui.image_viewer import ImageViewer
+from nist_biometric_viewer.ui.main_window import MainWindow
+from nist_biometric_viewer.ui.resources import application_icon_path
+from nist_biometric_viewer.ui.settings import AppSettings
+from nist_biometric_viewer.ui.settings_dialog import SettingsDialog
+from nist_biometric_viewer.ui.setup_dialog import ComparisonSetupDialog
+from nist_biometric_viewer.ui.styles import APP_STYLESHEET
 
 
 def _window(tmp_path: Path) -> MainWindow:
@@ -595,7 +595,7 @@ def test_setup_dialog_accepts_dragged_record_group_and_zip(tmp_path, monkeypatch
     dialog = ComparisonSetupDialog(tmp_path)
     callbacks: list[object] = []
     monkeypatch.setattr(
-        "nist_fingerprint_comparator.ui.setup_dialog.QTimer.singleShot",
+        "nist_biometric_viewer.ui.setup_dialog.QTimer.singleShot",
         lambda _delay, callback: callbacks.append(callback),
     )
 
@@ -716,7 +716,7 @@ def test_initial_screen_accepts_supported_drop_and_opens_setup(tmp_path, monkeyp
     callbacks: list[object] = []
     window._open_comparison_setup = lambda initial_paths=None: opened.append(initial_paths)
     monkeypatch.setattr(
-        "nist_fingerprint_comparator.ui.main_window.QTimer.singleShot",
+        "nist_biometric_viewer.ui.main_window.QTimer.singleShot",
         lambda _delay, callback: callbacks.append(callback),
     )
     event = _drop_event(paths)
@@ -1304,6 +1304,13 @@ def test_history_dialog_displays_current_database_records(tmp_path) -> None:
     assert dialog.table.rowCount() == 1
     assert dialog.table.item(0, 1).text() == "UTC"
     assert dialog.table.item(0, 2).text() == "NO_MATCH"
+    headers = [
+        dialog.table.horizontalHeaderItem(index).text()
+        for index in range(dialog.table.columnCount())
+    ]
+    assert "Reference Record" in headers
+    assert "Comparison Record" in headers
+    assert all("File A" not in header and "File B" not in header for header in headers)
     assert dialog.summary_label.text() == "1 decision"
     assert dialog.export_history_button.text() == "Export..."
     assert not dialog.export_history_button.isEnabled()
@@ -1474,11 +1481,7 @@ def test_about_dialog_uses_clickable_professional_contact_details() -> None:
     assert "Visual review only" in dialog.details_label.text()
     assert "github.com/nekcht" in dialog.details_label.text()
     assert dialog.windowTitle() == "About Nist Biometric Viewer"
-    assert dialog.findChild(QLabel, "aboutHeading").text() == "About"
-    assert (
-        dialog.findChild(QLabel, "aboutHeading").alignment()
-        & Qt.AlignmentFlag.AlignCenter
-    )
+    assert dialog.findChild(QLabel, "aboutHeading") is None
     dialog.close()
     application.processEvents()
 

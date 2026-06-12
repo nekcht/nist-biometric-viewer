@@ -12,18 +12,18 @@ os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 from PySide6.QtCore import QSettings
 from PySide6.QtWidgets import QApplication, QMessageBox
 
-from nist_fingerprint_comparator.core.loading import (
+from nist_biometric_viewer.core.loading import (
     LoadingError,
     sanitize_diagnostic,
     validate_loading_file,
 )
-from nist_fingerprint_comparator.core.models import BiometricImage, NistTransaction
-from nist_fingerprint_comparator.core.review import DecisionHistoryStore
-from nist_fingerprint_comparator.logging_config import SanitizingLogFilter
-from nist_fingerprint_comparator.ui.main_window import MainWindow
-from nist_fingerprint_comparator.ui.settings import HISTORY_DATABASE_FILENAME, AppSettings
-from nist_fingerprint_comparator.ui.worker import ArchiveWorker, ParseWorker
-from nist_fingerprint_comparator.user_data import USER_DATA_ROOT_ENV
+from nist_biometric_viewer.core.models import BiometricImage, NistTransaction
+from nist_biometric_viewer.core.review import DecisionHistoryStore
+from nist_biometric_viewer.logging_config import SanitizingLogFilter
+from nist_biometric_viewer.ui.main_window import MainWindow
+from nist_biometric_viewer.ui.settings import HISTORY_DATABASE_FILENAME, AppSettings
+from nist_biometric_viewer.ui.worker import ArchiveWorker, ParseWorker
+from nist_biometric_viewer.user_data import USER_DATA_ROOT_ENV
 
 
 def _window(tmp_path: Path) -> MainWindow:
@@ -74,7 +74,7 @@ def test_parser_fatal_failure_emits_controlled_loading_error(
     worker = ParseWorker(path)
     worker.failed.connect(errors.append)
     monkeypatch.setattr(
-        "nist_fingerprint_comparator.ui.worker.NistParser.parse_file",
+        "nist_biometric_viewer.ui.worker.NistParser.parse_file",
         lambda *_args: (_ for _ in ()).throw(ValueError("Unexpected end of record")),
     )
 
@@ -101,11 +101,11 @@ def test_decoder_failure_becomes_image_warning(tmp_path: Path, monkeypatch) -> N
     worker.finished.connect(finished.append)
     worker.failed.connect(errors.append)
     monkeypatch.setattr(
-        "nist_fingerprint_comparator.ui.worker.NistParser.parse_file",
+        "nist_biometric_viewer.ui.worker.NistParser.parse_file",
         lambda *_args: transaction,
     )
     monkeypatch.setattr(
-        "nist_fingerprint_comparator.ui.worker.ImageDecoder.decode",
+        "nist_biometric_viewer.ui.worker.ImageDecoder.decode",
         lambda *_args: (_ for _ in ()).throw(RuntimeError("decoder exploded")),
     )
 
@@ -218,7 +218,7 @@ def test_corrupt_history_does_not_crash_main_window_startup(
     history_path.write_bytes(b"corrupt history")
     monkeypatch.setenv(USER_DATA_ROOT_ENV, str(root))
     monkeypatch.setattr(
-        "nist_fingerprint_comparator.ui.main_window.QTimer.singleShot",
+        "nist_biometric_viewer.ui.main_window.QTimer.singleShot",
         lambda *_args: None,
     )
     settings = AppSettings(

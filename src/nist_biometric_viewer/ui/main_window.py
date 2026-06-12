@@ -32,21 +32,21 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from nist_fingerprint_comparator.core.archive import (
+from nist_biometric_viewer.core.archive import (
     ArchiveComparisonSelection,
     ArchiveContents,
     build_archive_comparison_selection,
 )
-from nist_fingerprint_comparator.core.loading import (
+from nist_biometric_viewer.core.loading import (
     LoadingError,
     loading_error_from_exception,
 )
-from nist_fingerprint_comparator.core.models import NistTransaction
-from nist_fingerprint_comparator.core.pairing import (
+from nist_biometric_viewer.core.models import NistTransaction
+from nist_biometric_viewer.core.pairing import (
     build_cross_file_comparison,
     files_have_same_content,
 )
-from nist_fingerprint_comparator.core.review import (
+from nist_biometric_viewer.core.review import (
     DecisionHistoryStore,
     DecisionXlsxExporter,
     ReviewDecision,
@@ -54,7 +54,7 @@ from nist_fingerprint_comparator.core.review import (
     ReviewQueue,
     decision_record,
 )
-from nist_fingerprint_comparator.user_data import create_archive_temp_directory
+from nist_biometric_viewer.user_data import create_archive_temp_directory
 
 from .about_dialog import AboutDialog
 from .archive_reference_dialog import ArchiveReferenceDialog

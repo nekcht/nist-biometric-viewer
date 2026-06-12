@@ -6,8 +6,8 @@ import logging
 import re
 from pathlib import Path
 
-from nist_fingerprint_comparator.core.errors import NistParseError
-from nist_fingerprint_comparator.core.models import NistRecord, NistTransaction
+from nist_biometric_viewer.core.errors import NistParseError
+from nist_biometric_viewer.core.models import NistRecord, NistTransaction
 
 from .constants import SUPPORTED_RECORD_TYPES, SUPPORTED_TAGGED_IMAGE_RECORDS
 from .fields import FIRST_LENGTH_RE, TAG_RE, decode_text, scalar_text

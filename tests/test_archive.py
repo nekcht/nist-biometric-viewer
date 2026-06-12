@@ -6,13 +6,13 @@ from zipfile import BadZipFile, ZipFile
 
 import pytest
 
-from nist_fingerprint_comparator.core.archive import (
+from nist_biometric_viewer.core.archive import (
     ArchiveContents,
     ComparisonArchiveError,
     build_archive_comparison_selection,
     prepare_comparison_archive,
 )
-from nist_fingerprint_comparator.core.loading import LoadingCancelled
+from nist_biometric_viewer.core.loading import LoadingCancelled
 
 
 def _archive(path: Path, members: dict[str, bytes]) -> Path:
@@ -198,7 +198,7 @@ def test_encrypted_zip_has_controlled_error(tmp_path: Path, monkeypatch) -> None
             return [member]
 
     monkeypatch.setattr(
-        "nist_fingerprint_comparator.core.archive.ZipFile",
+        "nist_biometric_viewer.core.archive.ZipFile",
         lambda _path: FakeEncryptedZip(),
     )
 

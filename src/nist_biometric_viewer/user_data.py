@@ -13,9 +13,10 @@ from tempfile import TemporaryDirectory
 
 from PySide6.QtCore import QStandardPaths
 
-APP_DATA_DIRECTORY_NAME = "nistBiometricViewer"
-LEGACY_APP_DATA_DIRECTORY_NAMES = ("ForensicPrintComparator",)
-USER_DATA_ROOT_ENV = "FORENSICPRINT_COMPARATOR_USER_DATA_DIR"
+APP_DATA_DIRECTORY_NAME = "NistBiometricViewer"
+LEGACY_APP_DATA_DIRECTORY_NAMES = ("nistBiometricViewer", "ForensicPrintComparator")
+USER_DATA_ROOT_ENV = "NIST_BIOMETRIC_VIEWER_USER_DATA_DIR"
+LEGACY_USER_DATA_ROOT_ENVS = ("FORENSICPRINT_COMPARATOR_USER_DATA_DIR",)
 USER_DATA_SUBDIRECTORIES = ("config", "logs", "history", "exports", "temp")
 TEMP_SESSION_PREFIX = "archive-session-"
 TEMP_SESSION_MARKER = ".nist-biometric-viewer-temp"
@@ -24,19 +25,32 @@ TEMP_SESSION_RETENTION_SECONDS = 24 * 60 * 60
 
 def get_user_data_dir() -> Path:
     """Return the per-user root shared by the app and Windows installer."""
-    configured = os.environ.get(USER_DATA_ROOT_ENV)
-    if configured:
-        return Path(configured).expanduser()
+    configured = _configured_user_data_dir()
+    if configured is not None:
+        return configured
 
     return _user_data_base() / APP_DATA_DIRECTORY_NAME
 
 
 def get_legacy_user_data_dirs() -> list[Path]:
     """Return former per-user roots eligible for one-time data migration."""
-    if os.environ.get(USER_DATA_ROOT_ENV):
+    if _configured_user_data_dir() is not None:
         return []
     base = _user_data_base()
-    return [base / name for name in LEGACY_APP_DATA_DIRECTORY_NAMES]
+    current = base / APP_DATA_DIRECTORY_NAME
+    return [
+        candidate
+        for name in LEGACY_APP_DATA_DIRECTORY_NAMES
+        if (candidate := base / name) != current
+    ]
+
+
+def _configured_user_data_dir() -> Path | None:
+    for environment_name in (USER_DATA_ROOT_ENV, *LEGACY_USER_DATA_ROOT_ENVS):
+        configured = os.environ.get(environment_name)
+        if configured:
+            return Path(configured).expanduser()
+    return None
 
 
 def _user_data_base() -> Path:
@@ -166,6 +180,9 @@ def install_default_user_files(defaults_root: Path | None = None) -> list[Path]:
             continue
         destination = get_user_data_dir() / relative_path
         destination.parent.mkdir(parents=True, exist_ok=True)
+        if _copy_missing_legacy_user_file(relative_path, destination):
+            installed.append(destination)
+            continue
         destination_created = False
         try:
             with source.open("rb") as source_file, destination.open("xb") as destination_file:
@@ -179,6 +196,26 @@ def install_default_user_files(defaults_root: Path | None = None) -> list[Path]:
             raise
         installed.append(destination)
     return installed
+
+
+def _copy_missing_legacy_user_file(relative_path: Path, destination: Path) -> bool:
+    for legacy_root in get_legacy_user_data_dirs():
+        source = legacy_root / relative_path
+        if not source.is_file():
+            continue
+        destination_created = False
+        try:
+            with source.open("rb") as source_file, destination.open("xb") as destination_file:
+                destination_created = True
+                shutil.copyfileobj(source_file, destination_file)
+        except FileExistsError:
+            return False
+        except OSError:
+            if destination_created:
+                destination.unlink(missing_ok=True)
+            raise
+        return True
+    return False
 
 
 def default_user_files_dir() -> Path:

@@ -5,8 +5,8 @@ from pathlib import Path
 import pytest
 from openpyxl import load_workbook
 
-from nist_fingerprint_comparator.core.models import NistTransaction
-from nist_fingerprint_comparator.core.review import (
+from nist_biometric_viewer.core.models import NistTransaction
+from nist_biometric_viewer.core.review import (
     DISPLAY_HISTORY_COLUMNS,
     HISTORY_COLUMNS,
     DecisionHistoryStore,
@@ -338,7 +338,7 @@ def test_failed_atomic_export_removes_temporary_workbook(
     output = tmp_path / "history.xlsx"
     decision = _decision(tmp_path, "1", "2026-06-10T12:00:00+00:00")
     monkeypatch.setattr(
-        "nist_fingerprint_comparator.core.review.os.replace",
+        "nist_biometric_viewer.core.review.os.replace",
         lambda *_args: (_ for _ in ()).throw(PermissionError("file is open")),
     )
 

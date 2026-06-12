@@ -11,6 +11,11 @@ if ([string]::IsNullOrWhiteSpace($PythonPath)) {
     $PythonPath = if (Test-Path -LiteralPath $VenvPython) { $VenvPython } else { "python" }
 }
 
+& $PythonPath -c "import PIL, PyInstaller, PySide6, openpyxl, rarfile" 2>$null
+if ($LASTEXITCODE -ne 0) {
+    throw "Required build dependencies are missing for $PythonPath. Install the project's dev dependencies."
+}
+
 $BuildDir = Join-Path $RepoRoot "build"
 $DistDir = Join-Path $RepoRoot "dist"
 foreach ($Target in @($BuildDir, $DistDir)) {
@@ -23,14 +28,9 @@ foreach ($Target in @($BuildDir, $DistDir)) {
     }
 }
 
-& $PythonPath -c "import PyInstaller" 2>$null
-if ($LASTEXITCODE -ne 0) {
-    throw "PyInstaller is not installed for $PythonPath. Install the project's dev dependencies."
-}
-
 Push-Location $RepoRoot
 try {
-    & $PythonPath -m PyInstaller "ForensicPrintComparator.spec" --clean --noconfirm
+    & $PythonPath -m PyInstaller "NistBiometricViewer.spec" --clean --noconfirm
     if ($LASTEXITCODE -ne 0) {
         throw "PyInstaller failed with exit code $LASTEXITCODE."
     }
@@ -39,7 +39,7 @@ finally {
     Pop-Location
 }
 
-$Executable = Join-Path $DistDir "ForensicPrintComparator\ForensicPrintComparator.exe"
+$Executable = Join-Path $DistDir "NistBiometricViewer\NistBiometricViewer.exe"
 if (-not (Test-Path -LiteralPath $Executable)) {
     throw "PyInstaller did not produce $Executable."
 }

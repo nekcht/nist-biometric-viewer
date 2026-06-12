@@ -13,7 +13,6 @@ dependencies = [
     "PySide6>=6.6",
     "openpyxl>=3.1",
     "rarfile>=4.2",
-    "wsq>=0.8",
 ]
 
 [project.optional-dependencies]
@@ -21,22 +20,24 @@ dev = [
     "pyinstaller>=6.0; sys_platform == 'win32'",
     "pytest>=8.0",
     "ruff>=0.5",
+    "wsq>=0.8",
 ]
+wsq = ["wsq>=0.8"]
 
 [project.scripts]
-nist-biometric-viewer = "nist_fingerprint_comparator.app:main"
+nist-biometric-viewer = "nist_biometric_viewer.app:main"
 
 [tool.setuptools]
 package-dir = {"" = "src"}
 
 [tool.setuptools.dynamic]
-version = {attr = "nist_fingerprint_comparator.__version__"}
+version = {attr = "nist_biometric_viewer.__version__"}
 
 [tool.setuptools.packages.find]
 where = ["src"]
 
 [tool.setuptools.data-files]
-"resources" = ["resources/nist_comparator.png"]
+"resources" = ["resources/nist_biometric_viewer.png"]
 
 [tool.pytest.ini_options]
 addopts = "-q"

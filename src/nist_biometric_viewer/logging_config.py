@@ -9,9 +9,9 @@ from pathlib import Path
 from .core.loading import sanitize_diagnostic
 from .user_data import APP_DATA_DIRECTORY_NAME, get_logs_dir
 
-LOGGER_NAME = "nist_fingerprint_comparator"
+LOGGER_NAME = "nist_biometric_viewer"
 LOG_DIRECTORY_NAME = APP_DATA_DIRECTORY_NAME
-LOG_FILENAME = "nist_fingerprint_comparator.log"
+LOG_FILENAME = "nist_biometric_viewer.log"
 LOG_MAX_BYTES = 5 * 1024 * 1024
 LOG_BACKUP_COUNT = 5
 

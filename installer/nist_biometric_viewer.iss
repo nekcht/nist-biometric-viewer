@@ -1,4 +1,4 @@
-; Nist Biometric Viewer / ForensicPrintComparator per-user Windows installer.
+; Nist Biometric Viewer per-user Windows installer.
 ; Config, logs, and history are intentionally stored under {userappdata} and preserved.
 ; The installer never installs biometric/evidence payloads or stores them under {app}.
 
@@ -8,9 +8,9 @@
 
 #define AppName "Nist Biometric Viewer"
 #define AppPublisher "Hellenic Police"
-#define AppExeName "ForensicPrintComparator.exe"
-#define InstallDirectoryName "ForensicPrintComparator"
-#define AppDataName "nistBiometricViewer"
+#define AppExeName "NistBiometricViewer.exe"
+#define InstallDirectoryName "NistBiometricViewer"
+#define AppDataName "NistBiometricViewer"
 #define SourceRoot ".."
 
 [Setup]
@@ -19,12 +19,13 @@ AppName={#AppName}
 AppVersion={#AppVersion}
 AppPublisher={#AppPublisher}
 DefaultDirName={localappdata}\Programs\{#InstallDirectoryName}
+UsePreviousAppDir=no
 DefaultGroupName={#AppName}
 DisableProgramGroupPage=yes
 PrivilegesRequired=lowest
 OutputDir=output
 OutputBaseFilename=NistBiometricViewer_Setup_{#AppVersion}
-SetupIconFile={#SourceRoot}\resources\nist_comparator.ico
+SetupIconFile={#SourceRoot}\resources\nist_biometric_viewer.ico
 UninstallDisplayIcon={app}\{#AppExeName}
 Compression=lzma2
 SolidCompression=yes
@@ -35,9 +36,7 @@ SetupLogging=yes
 Name: "desktopicon"; Description: "Create a desktop shortcut"; GroupDescription: "Additional icons:"; Flags: unchecked
 
 [Files]
-Source: "{#SourceRoot}\dist\ForensicPrintComparator\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs
-; Baseline configuration is copied only for a new user and is preserved on upgrade/uninstall.
-Source: "default_user_files\config\settings.ini"; DestDir: "{userappdata}\{#AppDataName}\config"; Flags: onlyifdoesntexist uninsneveruninstall
+Source: "{#SourceRoot}\dist\NistBiometricViewer\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs
 
 [Dirs]
 ; These per-user directories contain no installer-provided biometric/evidence files.

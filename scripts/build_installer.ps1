@@ -28,13 +28,13 @@ if (Test-Path -LiteralPath $OutputDir) {
 Push-Location $RepoRoot
 try {
     $Version = (
-        & $PythonPath -c "import runpy; print(runpy.run_path('src/nist_fingerprint_comparator/__init__.py')['__version__'])"
+        & $PythonPath -c "import runpy; print(runpy.run_path('src/nist_biometric_viewer/__init__.py')['__version__'])"
     ).Trim()
     if ($LASTEXITCODE -ne 0 -or [string]::IsNullOrWhiteSpace($Version)) {
         throw "Could not read the application version."
     }
 
-    & $ISCCPath "/DAppVersion=$Version" "installer\forensicprint_comparator.iss"
+    & $ISCCPath "/DAppVersion=$Version" "installer\nist_biometric_viewer.iss"
     if ($LASTEXITCODE -ne 0) {
         throw "Inno Setup compilation failed with exit code $LASTEXITCODE."
     }

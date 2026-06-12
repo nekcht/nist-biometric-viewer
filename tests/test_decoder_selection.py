@@ -2,10 +2,10 @@ from io import BytesIO
 
 from PIL import Image
 
-from nist_fingerprint_comparator.core.models import BiometricImage
-from nist_fingerprint_comparator.imaging.decoder import ImageDecoder
-from nist_fingerprint_comparator.imaging.wsq_decoder import WSQ_UNAVAILABLE_MESSAGE
-from nist_fingerprint_comparator.nist.records import normalize_compression
+from nist_biometric_viewer.core.models import BiometricImage
+from nist_biometric_viewer.imaging.decoder import ImageDecoder
+from nist_biometric_viewer.imaging.wsq_decoder import WSQ_UNAVAILABLE_MESSAGE
+from nist_biometric_viewer.nist.records import normalize_compression
 
 
 def _png_bytes() -> bytes:
@@ -61,6 +61,24 @@ def test_unavailable_jpeg2000_support_is_reported_as_unsupported() -> None:
 
     assert decoded.decode_status == "unsupported"
     assert decoded.warnings[-1] == "JPEG2000 decoder not configured."
+
+
+def test_pillow_safety_failure_is_reported_without_raw_exception_details(
+    monkeypatch,
+) -> None:
+    image = BiometricImage(record_type=14, compression="PNG", image_bytes=b"payload")
+    monkeypatch.setattr(
+        "nist_biometric_viewer.imaging.pillow_decoder.Image.open",
+        lambda *_args: (_ for _ in ()).throw(
+            Image.DecompressionBombError("sensitive decoder details")
+        ),
+    )
+
+    decoded = ImageDecoder().decode(image)
+
+    assert decoded.decode_status == "failed"
+    assert decoded.warnings[-1] == "Image not decoded: DecompressionBombError."
+    assert "sensitive decoder details" not in decoded.warnings[-1]
 
 
 def test_wsq_profile_label_is_normalized() -> None:

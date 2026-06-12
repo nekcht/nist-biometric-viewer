@@ -3,9 +3,11 @@ from pathlib import Path
 
 import pytest
 
-import nist_fingerprint_comparator.user_data as user_data
-from nist_fingerprint_comparator.user_data import (
+import nist_biometric_viewer.user_data as user_data
+from nist_biometric_viewer.user_data import (
     APP_DATA_DIRECTORY_NAME,
+    LEGACY_APP_DATA_DIRECTORY_NAMES,
+    LEGACY_USER_DATA_ROOT_ENVS,
     TEMP_SESSION_MARKER,
     TEMP_SESSION_PREFIX,
     USER_DATA_ROOT_ENV,
@@ -15,6 +17,7 @@ from nist_fingerprint_comparator.user_data import (
     get_config_dir,
     get_exports_dir,
     get_history_dir,
+    get_legacy_user_data_dirs,
     get_logs_dir,
     get_temp_dir,
     get_user_data_dir,
@@ -26,12 +29,12 @@ def test_windows_appdata_uses_stable_application_directory(tmp_path: Path, monke
     monkeypatch.delenv(USER_DATA_ROOT_ENV, raising=False)
     monkeypatch.setenv("APPDATA", str(tmp_path))
 
-    assert APP_DATA_DIRECTORY_NAME == "nistBiometricViewer"
+    assert APP_DATA_DIRECTORY_NAME == "NistBiometricViewer"
     assert get_user_data_dir() == tmp_path / APP_DATA_DIRECTORY_NAME
 
 
 def test_path_helpers_use_expected_per_user_structure(tmp_path: Path, monkeypatch) -> None:
-    root = tmp_path / "nistBiometricViewer"
+    root = tmp_path / "NistBiometricViewer"
     monkeypatch.setenv(USER_DATA_ROOT_ENV, str(root))
 
     assert get_user_data_dir() == root
@@ -40,6 +43,46 @@ def test_path_helpers_use_expected_per_user_structure(tmp_path: Path, monkeypatc
     assert get_history_dir() == root / "history"
     assert get_exports_dir() == root / "exports"
     assert get_temp_dir() == root / "temp"
+
+
+def test_legacy_user_data_names_remain_available_for_migration(
+    tmp_path: Path, monkeypatch
+) -> None:
+    monkeypatch.delenv(USER_DATA_ROOT_ENV, raising=False)
+    for environment_name in LEGACY_USER_DATA_ROOT_ENVS:
+        monkeypatch.delenv(environment_name, raising=False)
+    monkeypatch.setenv("APPDATA", str(tmp_path))
+
+    assert LEGACY_APP_DATA_DIRECTORY_NAMES == (
+        "nistBiometricViewer",
+        "ForensicPrintComparator",
+    )
+    expected = [tmp_path / "ForensicPrintComparator"]
+    casing_only_legacy_path = tmp_path / "nistBiometricViewer"
+    if casing_only_legacy_path != tmp_path / APP_DATA_DIRECTORY_NAME:
+        expected.insert(0, casing_only_legacy_path)
+    assert get_legacy_user_data_dirs() == expected
+
+
+def test_legacy_user_data_environment_override_remains_supported(
+    tmp_path: Path, monkeypatch
+) -> None:
+    legacy_root = tmp_path / "legacy-override"
+    monkeypatch.delenv(USER_DATA_ROOT_ENV, raising=False)
+    monkeypatch.setenv(LEGACY_USER_DATA_ROOT_ENVS[0], str(legacy_root))
+
+    assert get_user_data_dir() == legacy_root
+    assert get_legacy_user_data_dirs() == []
+
+
+def test_current_user_data_environment_override_takes_precedence(
+    tmp_path: Path, monkeypatch
+) -> None:
+    current_root = tmp_path / "current-override"
+    monkeypatch.setenv(USER_DATA_ROOT_ENV, str(current_root))
+    monkeypatch.setenv(LEGACY_USER_DATA_ROOT_ENVS[0], str(tmp_path / "legacy-override"))
+
+    assert get_user_data_dir() == current_root
 
 
 def test_ensure_user_data_dirs_is_idempotent(tmp_path: Path, monkeypatch) -> None:
@@ -173,6 +216,28 @@ def test_default_files_do_not_overwrite_existing_config(tmp_path: Path, monkeypa
     assert settings.read_text(encoding="utf-8") == "user setting"
 
 
+def test_default_file_installation_migrates_legacy_config(
+    tmp_path: Path, monkeypatch
+) -> None:
+    defaults = tmp_path / "defaults"
+    default_settings = defaults / "config" / "settings.ini"
+    default_settings.parent.mkdir(parents=True)
+    default_settings.write_text("installer default", encoding="utf-8")
+    legacy_settings = tmp_path / "ForensicPrintComparator" / "config" / "settings.ini"
+    legacy_settings.parent.mkdir(parents=True)
+    legacy_settings.write_text("legacy user setting", encoding="utf-8")
+    monkeypatch.delenv(USER_DATA_ROOT_ENV, raising=False)
+    for environment_name in LEGACY_USER_DATA_ROOT_ENVS:
+        monkeypatch.delenv(environment_name, raising=False)
+    monkeypatch.setenv("APPDATA", str(tmp_path))
+
+    installed = install_default_user_files(defaults)
+    settings = get_config_dir() / "settings.ini"
+
+    assert installed == [settings]
+    assert settings.read_text(encoding="utf-8") == "legacy user setting"
+
+
 def test_failed_default_file_copy_removes_partial_destination(
     tmp_path: Path,
     monkeypatch,
@@ -221,9 +286,34 @@ def test_default_user_files_include_no_biometric_or_evidence_samples() -> None:
 
 def test_windows_installer_creates_named_user_data_directory() -> None:
     installer = (
-        Path(__file__).resolve().parents[1] / "installer" / "forensicprint_comparator.iss"
+        Path(__file__).resolve().parents[1] / "installer" / "nist_biometric_viewer.iss"
     ).read_text(encoding="utf-8")
 
-    assert '#define AppDataName "nistBiometricViewer"' in installer
+    assert '#define AppExeName "NistBiometricViewer.exe"' in installer
+    assert '#define InstallDirectoryName "NistBiometricViewer"' in installer
+    assert '#define AppDataName "NistBiometricViewer"' in installer
     assert 'DefaultDirName={localappdata}\\Programs\\{#InstallDirectoryName}' in installer
+    assert "UsePreviousAppDir=no" in installer
+    assert "PrivilegesRequired=lowest" in installer
+    assert "OutputBaseFilename=NistBiometricViewer_Setup_{#AppVersion}" in installer
+    assert 'Source: "{#SourceRoot}\\dist\\NistBiometricViewer\\*"' in installer
+    assert "ForensicPrintComparator" not in installer
+    assert 'Name: "desktopicon"' in installer
+    assert "Flags: unchecked" in installer
     assert 'Name: "{userappdata}\\{#AppDataName}\\history"' in installer
+    assert "uninsneveruninstall" in installer
+
+
+def test_windows_build_rejects_missing_required_runtime_dependencies() -> None:
+    build_script = (
+        Path(__file__).resolve().parents[1] / "scripts" / "build_windows.ps1"
+    ).read_text(encoding="utf-8")
+
+    assert "import PIL, PyInstaller, PySide6, openpyxl, rarfile" in build_script
+    assert "Required build dependencies are missing" in build_script
+    assert '"NistBiometricViewer.spec"' in build_script
+    assert '"NistBiometricViewer\\NistBiometricViewer.exe"' in build_script
+    assert "ForensicPrintComparator" not in build_script
+    assert build_script.index("import PIL, PyInstaller") < build_script.index(
+        '$BuildDir = Join-Path $RepoRoot "build"'
+    )

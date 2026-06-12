@@ -8,7 +8,7 @@ from pathlib import Path
 
 from PySide6.QtCore import QDateTime, QSettings, QTimeZone
 
-from nist_fingerprint_comparator.user_data import (
+from nist_biometric_viewer.user_data import (
     ensure_user_data_dirs,
     get_config_dir,
     get_exports_dir,

@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import importlib
 
-from nist_fingerprint_comparator.core.models import BiometricImage
+from nist_biometric_viewer.core.models import BiometricImage
 
 from .pillow_decoder import PillowDecoder
 

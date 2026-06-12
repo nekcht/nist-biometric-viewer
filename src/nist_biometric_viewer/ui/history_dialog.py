@@ -19,7 +19,7 @@ from PySide6.QtWidgets import (
     QVBoxLayout,
 )
 
-from nist_fingerprint_comparator.core.review import (
+from nist_biometric_viewer.core.review import (
     DISPLAY_HISTORY_COLUMNS,
     EXPORT_HEADERS,
     HISTORY_ID_KEY,
@@ -27,10 +27,10 @@ from nist_fingerprint_comparator.core.review import (
 
 HISTORY_DIALOG_HEADERS = {
     **EXPORT_HEADERS,
-    "file_a_name": "File A",
-    "file_a_reference_number": "File A (MN1)",
-    "file_b_name": "File B",
-    "file_b_reference_number": "File B (MN1)",
+    "file_a_name": "Reference Record",
+    "file_a_reference_number": "Reference Record (MN1)",
+    "file_b_name": "Comparison Record",
+    "file_b_reference_number": "Comparison Record (MN1)",
 }
 LOGGER = logging.getLogger(__name__)
 HISTORY_PAGE_SIZE = 50

@@ -2,11 +2,12 @@
 
 from __future__ import annotations
 
+import warnings
 from io import BytesIO
 
 from PIL import Image
 
-from nist_fingerprint_comparator.core.models import BiometricImage
+from nist_biometric_viewer.core.models import BiometricImage
 
 
 class PillowDecoder:
@@ -18,8 +19,10 @@ class PillowDecoder:
             image.warnings.append("Image data unavailable.")
             return image
         try:
-            with Image.open(BytesIO(image.image_bytes)) as opened:
-                decoded = opened.copy()
+            with warnings.catch_warnings():
+                warnings.simplefilter("error", Image.DecompressionBombWarning)
+                with Image.open(BytesIO(image.image_bytes)) as opened:
+                    decoded = opened.copy()
             image.decoded_pil_image = decoded
             image.width = image.width or decoded.width
             image.height = image.height or decoded.height
@@ -27,7 +30,7 @@ class PillowDecoder:
             image.decode_status = "decoded"
         except Exception as exc:
             image.decode_status = "failed"
-            image.warnings.append(f"Image not decoded: {exc}")
+            image.warnings.append(f"Image not decoded: {type(exc).__name__}.")
         return image
 
 

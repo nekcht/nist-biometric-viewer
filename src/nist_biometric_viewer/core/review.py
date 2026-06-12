@@ -51,8 +51,8 @@ class ReviewDecision:
     decision: ReviewDecisionValue
     candidate_number: int
     candidate_total: int
-    file_a: NistTransaction
-    file_b: NistTransaction
+    file_a: NistTransaction = field(repr=False)
+    file_b: NistTransaction = field(repr=False)
     timestamp_utc: str = field(default_factory=lambda: datetime.now(UTC).isoformat())
     timestamp: str = field(default_factory=lambda: datetime.now(UTC).isoformat())
     timezone: str = "UTC"

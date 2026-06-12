@@ -5,8 +5,8 @@ from __future__ import annotations
 from PySide6.QtCore import Qt
 from PySide6.QtWidgets import QFrame, QLabel, QSizePolicy, QStackedWidget, QVBoxLayout
 
-from nist_fingerprint_comparator.core.models import BiometricImage, metadata_display_rows
-from nist_fingerprint_comparator.imaging.qimage_utils import pil_to_qpixmap
+from nist_biometric_viewer.core.models import BiometricImage, metadata_display_rows
+from nist_biometric_viewer.imaging.qimage_utils import pil_to_qpixmap
 
 from .image_viewer import ImageViewer
 from .metadata_panel import MetadataPanel

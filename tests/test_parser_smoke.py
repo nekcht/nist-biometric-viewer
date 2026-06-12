@@ -1,7 +1,7 @@
 from pathlib import Path
 
-from nist_fingerprint_comparator.nist.parser import NistParser
-from nist_fingerprint_comparator.nist.separators import FS_BYTES, GS_BYTES
+from nist_biometric_viewer.nist.parser import NistParser
+from nist_biometric_viewer.nist.separators import FS_BYTES, GS_BYTES
 
 
 def _tagged_record(record_type: int, fields: list[tuple[str, bytes]]) -> bytes:

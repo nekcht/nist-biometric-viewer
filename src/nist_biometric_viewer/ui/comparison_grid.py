@@ -5,7 +5,7 @@ from __future__ import annotations
 from PySide6.QtCore import QTimer
 from PySide6.QtWidgets import QFrame, QHBoxLayout, QLabel, QScrollArea, QVBoxLayout, QWidget
 
-from nist_fingerprint_comparator.core.models import ComparisonSession
+from nist_biometric_viewer.core.models import ComparisonSession
 
 from .fingerprint_card import FingerprintCard
 

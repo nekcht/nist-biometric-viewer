@@ -4,10 +4,10 @@ from pathlib import Path
 import pytest
 from PySide6.QtCore import QSettings
 
-from nist_fingerprint_comparator.core.models import NistTransaction
-from nist_fingerprint_comparator.core.review import DecisionHistoryStore, ReviewDecision
-from nist_fingerprint_comparator.ui.settings import HISTORY_DATABASE_FILENAME, AppSettings
-from nist_fingerprint_comparator.user_data import (
+from nist_biometric_viewer.core.models import NistTransaction
+from nist_biometric_viewer.core.review import DecisionHistoryStore, ReviewDecision
+from nist_biometric_viewer.ui.settings import HISTORY_DATABASE_FILENAME, AppSettings
+from nist_biometric_viewer.user_data import (
     APP_DATA_DIRECTORY_NAME,
     USER_DATA_ROOT_ENV,
     get_exports_dir,
@@ -24,13 +24,17 @@ def test_internal_history_uses_application_data_location(
     assert settings.history_database_path() == get_history_dir() / HISTORY_DATABASE_FILENAME
 
 
+@pytest.mark.parametrize(
+    "legacy_directory_name",
+    ["nistBiometricViewer", "ForensicPrintComparator"],
+)
 def test_legacy_history_is_copied_and_opened_from_new_user_data_folder(
-    tmp_path: Path, monkeypatch
+    tmp_path: Path, monkeypatch, legacy_directory_name: str
 ) -> None:
     monkeypatch.delenv(USER_DATA_ROOT_ENV, raising=False)
     monkeypatch.setenv("APPDATA", str(tmp_path))
     legacy_path = (
-        tmp_path / "ForensicPrintComparator" / "history" / HISTORY_DATABASE_FILENAME
+        tmp_path / legacy_directory_name / "history" / HISTORY_DATABASE_FILENAME
     )
     legacy_store = DecisionHistoryStore(legacy_path)
     legacy_store.append(
@@ -50,11 +54,10 @@ def test_legacy_history_is_copied_and_opened_from_new_user_data_folder(
         tmp_path / APP_DATA_DIRECTORY_NAME / "history" / HISTORY_DATABASE_FILENAME
     )
     assert history_path.exists()
-    assert history_path != legacy_path
     assert DecisionHistoryStore(history_path).count() == 1
 
 
-def test_history_ignores_nist_fingerprint_comparator_folder(
+def test_history_ignores_nist_biometric_viewer_folder(
     tmp_path: Path, monkeypatch
 ) -> None:
     monkeypatch.delenv(USER_DATA_ROOT_ENV, raising=False)

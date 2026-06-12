@@ -1,7 +1,7 @@
 from PIL import Image
 
-from nist_fingerprint_comparator.core.models import BiometricImage
-from nist_fingerprint_comparator.core.pairing import (
+from nist_biometric_viewer.core.models import BiometricImage
+from nist_biometric_viewer.core.pairing import (
     build_cross_file_comparison,
     finger_details,
 )

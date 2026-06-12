@@ -7,7 +7,7 @@ from pathlib import Path
 
 from PySide6.QtGui import QIcon
 
-APP_ICON_FILENAME = "nist_comparator.png"
+APP_ICON_FILENAME = "nist_biometric_viewer.png"
 
 
 def application_icon_path() -> Path:

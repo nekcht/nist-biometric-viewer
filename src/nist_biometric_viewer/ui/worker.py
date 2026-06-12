@@ -7,14 +7,14 @@ from pathlib import Path
 
 from PySide6.QtCore import QObject, QThread, Signal, Slot
 
-from nist_fingerprint_comparator.core.archive import prepare_comparison_archive
-from nist_fingerprint_comparator.core.loading import (
+from nist_biometric_viewer.core.archive import prepare_comparison_archive
+from nist_biometric_viewer.core.loading import (
     LoadingCancelled,
     loading_error_from_exception,
     validate_loading_file,
 )
-from nist_fingerprint_comparator.imaging.decoder import ImageDecoder
-from nist_fingerprint_comparator.nist.parser import NistParser
+from nist_biometric_viewer.imaging.decoder import ImageDecoder
+from nist_biometric_viewer.nist.parser import NistParser
 
 LOGGER = logging.getLogger(__name__)
 

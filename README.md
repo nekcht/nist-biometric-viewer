@@ -25,7 +25,8 @@ Decoded image formats:
 - WSQ when the WSQ plugin is available
 
 ANSI/NIST versions and agency profiles vary. Unsupported or malformed records may appear
-as warnings.
+as warnings. ZIP archives are supported; RAR archives require a compatible extraction
+backend.
 
 ## Run From Source
 
@@ -35,7 +36,7 @@ Python 3.11 or newer is required.
 python -m venv .venv
 .\.venv\Scripts\Activate.ps1
 python -m pip install -e ".[dev]"
-python -m nist_fingerprint_comparator.app
+python -m nist_biometric_viewer.app
 ```
 
 ## Windows Build
@@ -51,8 +52,8 @@ it is not an MSI installer.
 ## Privacy
 
 The app runs locally and offline and does not upload data. Biometric images are not written
-to disk by default. Decision history and exported workbooks may contain sensitive data and
-should be protected accordingly.
+to disk by default. Logs, decision history, and exported workbooks may contain sensitive
+data and should be protected accordingly.
 
 ## Development
 

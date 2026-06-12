@@ -17,7 +17,7 @@ class NistRecord:
     record_type: int
     length: int | None = None
     idc: str | None = None
-    fields: dict[str, object] = field(default_factory=dict)
+    fields: dict[str, object] = field(default_factory=dict, repr=False)
     raw_start_offset: int | None = None
     raw_end_offset: int | None = None
     warnings: list[str] = field(default_factory=list)
@@ -39,7 +39,7 @@ class BiometricImage:
     capture_date: str | None = None
     source_agency: str | None = None
     quality: str | None = None
-    raw_metadata: dict[str, object] = field(default_factory=dict)
+    raw_metadata: dict[str, object] = field(default_factory=dict, repr=False)
     image_bytes: bytes | None = field(default=None, repr=False)
     decoded_pil_image: Image.Image | None = field(default=None, repr=False)
     decode_status: DecodeStatus = "not_present"
@@ -48,13 +48,13 @@ class BiometricImage:
 
 @dataclass(slots=True)
 class NistTransaction:
-    source_path: Path
+    source_path: Path = field(repr=False)
     version: str | None = None
     transaction_type: str | None = None
-    records: list[NistRecord] = field(default_factory=list)
-    biometric_images: list[BiometricImage] = field(default_factory=list)
-    transaction_metadata: dict[str, str] = field(default_factory=dict)
-    descriptive_metadata: dict[str, str] = field(default_factory=dict)
+    records: list[NistRecord] = field(default_factory=list, repr=False)
+    biometric_images: list[BiometricImage] = field(default_factory=list, repr=False)
+    transaction_metadata: dict[str, str] = field(default_factory=dict, repr=False)
+    descriptive_metadata: dict[str, str] = field(default_factory=dict, repr=False)
     warnings: list[str] = field(default_factory=list)
 
     @property

@@ -1,3 +1,3 @@
-"""Nist Biometric Viewer."""
+"""Compatibility package for the legacy import path."""
 
-__version__ = "0.1.0"
+from nist_biometric_viewer import __version__
