@@ -1,11 +1,42 @@
-.venv/
+# Python bytecode
 __pycache__/
 *.py[cod]
+*$py.class
+
+# Virtual environments and local configuration
+.venv/
+venv/
+env/
+.env
+.env.*
+!.env.example
+
+# Test, lint, type-check, and coverage artifacts
 .pytest_cache/
-.pytest-tmp/
-.pytest-tmp-current/
+.pytest-tmp*/
 .ruff_cache/
+.mypy_cache/
+.pyright/
+.tox/
+.nox/
+.hypothesis/
+.coverage
+.coverage.*
+coverage.xml
+htmlcov/
+
+# Build and packaging artifacts
 build/
 dist/
-installer/output/
 *.egg-info/
+.eggs/
+pip-wheel-metadata/
+installer/output/
+
+# IDE and operating-system files
+.idea/
+.vscode/
+*.iml
+.DS_Store
+Thumbs.db
+Desktop.ini
