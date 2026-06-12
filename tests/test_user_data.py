@@ -325,6 +325,11 @@ def test_windows_installer_creates_named_user_data_directory() -> None:
     assert 'DefaultDirName={localappdata}\\Programs\\{#InstallDirectoryName}' in installer
     assert "UsePreviousAppDir=no" in installer
     assert "PrivilegesRequired=lowest" in installer
+    assert "MinVersion=10.0" in installer
+    assert (
+        "WindowsVersionNotSupported=Nist Biometric Viewer requires Windows 10 or newer. "
+        "Windows 7 is not supported."
+    ) in installer
     assert "OutputBaseFilename=NistBiometricViewer_Setup_{#AppVersion}" in installer
     assert 'Source: "{#SourceRoot}\\dist\\NistBiometricViewer\\*"' in installer
     assert "ForensicPrintComparator" not in installer
