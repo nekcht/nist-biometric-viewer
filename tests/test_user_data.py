@@ -2,7 +2,9 @@ import json
 from pathlib import Path
 
 import pytest
+from PySide6.QtCore import QLockFile
 
+import nist_biometric_viewer.app as app
 import nist_biometric_viewer.user_data as user_data
 from nist_biometric_viewer.user_data import (
     APP_DATA_DIRECTORY_NAME,
@@ -17,6 +19,7 @@ from nist_biometric_viewer.user_data import (
     get_config_dir,
     get_exports_dir,
     get_history_dir,
+    get_instance_lock_path,
     get_legacy_user_data_dirs,
     get_logs_dir,
     get_temp_dir,
@@ -43,6 +46,33 @@ def test_path_helpers_use_expected_per_user_structure(tmp_path: Path, monkeypatc
     assert get_history_dir() == root / "history"
     assert get_exports_dir() == root / "exports"
     assert get_temp_dir() == root / "temp"
+
+
+def test_instance_lock_allows_only_one_running_instance(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    root = tmp_path / "user-data"
+    monkeypatch.setenv(USER_DATA_ROOT_ENV, str(root))
+    ensure_user_data_dirs()
+
+    first, first_error = app._acquire_instance_lock()
+
+    assert first is not None
+    assert first_error == QLockFile.LockError.NoError
+    assert first.fileName() == str(get_instance_lock_path())
+    assert first.staleLockTime() == 0
+    try:
+        second, second_error = app._acquire_instance_lock()
+        assert second is None
+        assert second_error == QLockFile.LockError.LockFailedError
+    finally:
+        first.unlock()
+
+    third, third_error = app._acquire_instance_lock()
+    assert third is not None
+    assert third_error == QLockFile.LockError.NoError
+    third.unlock()
 
 
 def test_legacy_user_data_names_remain_available_for_migration(
@@ -317,3 +347,12 @@ def test_windows_build_rejects_missing_required_runtime_dependencies() -> None:
     assert build_script.index("import PIL, PyInstaller") < build_script.index(
         '$BuildDir = Join-Path $RepoRoot "build"'
     )
+
+
+def test_windows_bundle_disables_upx_for_first_run_compatibility() -> None:
+    spec = (
+        Path(__file__).resolve().parents[1] / "NistBiometricViewer.spec"
+    ).read_text(encoding="utf-8")
+
+    assert "upx=True" not in spec
+    assert spec.count("upx=False") == 2

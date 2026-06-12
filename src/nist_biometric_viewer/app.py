@@ -6,6 +6,7 @@ import ctypes
 import logging
 import sys
 
+from PySide6.QtCore import QLockFile
 from PySide6.QtWidgets import QApplication, QMessageBox
 
 from . import __version__
@@ -16,6 +17,7 @@ from .ui.styles import APP_STYLESHEET
 from .user_data import (
     cleanup_stale_temp_dirs,
     ensure_user_data_dirs,
+    get_instance_lock_path,
     install_default_user_files,
 )
 
@@ -47,25 +49,15 @@ def _configure_windows_app_identity() -> None:
         pass
 
 
-def main() -> int:
-    _configure_windows_app_identity()
-    application = QApplication(sys.argv)
-    application.setApplicationName("Nist Biometric Viewer")
-    application.setApplicationDisplayName("Nist Biometric Viewer")
-    application.setApplicationVersion(__version__)
-    application.setOrganizationName("Hellenic Police")
-    application.setWindowIcon(application_icon())
-    application.setStyleSheet(APP_STYLESHEET)
-    try:
-        ensure_user_data_dirs()
-    except OSError:
-        QMessageBox.critical(
-            None,
-            "Folder unavailable",
-            "Required application folders could not be created or accessed.",
-        )
-        return 1
+def _acquire_instance_lock() -> tuple[QLockFile | None, QLockFile.LockError]:
+    lock = QLockFile(str(get_instance_lock_path()))
+    lock.setStaleLockTime(0)
+    if lock.tryLock(0):
+        return lock, QLockFile.LockError.NoError
+    return None, lock.error()
 
+
+def _run_application(application: QApplication) -> int:
     configure_logging()
     _install_exception_logger()
     LOGGER.info("Starting Nist Biometric Viewer")
@@ -102,6 +94,47 @@ def main() -> int:
         return 1
     window.show()
     return application.exec()
+
+
+def main() -> int:
+    _configure_windows_app_identity()
+    application = QApplication(sys.argv)
+    application.setApplicationName("Nist Biometric Viewer")
+    application.setApplicationDisplayName("Nist Biometric Viewer")
+    application.setApplicationVersion(__version__)
+    application.setOrganizationName("Hellenic Police")
+    application.setWindowIcon(application_icon())
+    application.setStyleSheet(APP_STYLESHEET)
+    try:
+        ensure_user_data_dirs()
+    except OSError:
+        QMessageBox.critical(
+            None,
+            "Folder unavailable",
+            "Required application folders could not be created or accessed.",
+        )
+        return 1
+
+    instance_lock, lock_error = _acquire_instance_lock()
+    if instance_lock is None:
+        if lock_error == QLockFile.LockError.LockFailedError:
+            QMessageBox.information(
+                None,
+                "Nist Biometric Viewer is already running",
+                "Only one instance of Nist Biometric Viewer can run at a time.",
+            )
+            return 0
+        QMessageBox.critical(
+            None,
+            "Application could not start",
+            "The application instance lock could not be created.",
+        )
+        return 1
+
+    try:
+        return _run_application(application)
+    finally:
+        instance_lock.unlock()
 
 
 if __name__ == "__main__":

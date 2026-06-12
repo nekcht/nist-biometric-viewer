@@ -19,6 +19,13 @@ from PySide6.QtCore import QDateTime, Qt, QTimeZone
 from .models import NistTransaction
 
 ReviewDecisionValue = Literal["MATCH", "NO_MATCH", "PASS"]
+HistoryDecisionValue = Literal["MATCH", "NO_MATCH"]
+HISTORY_DECISION_VALUES: tuple[HistoryDecisionValue, ...] = ("MATCH", "NO_MATCH")
+DECISION_LABELS: dict[ReviewDecisionValue, str] = {
+    "MATCH": "HIT",
+    "NO_MATCH": "NO HIT",
+    "PASS": "PASS",
+}
 HISTORY_ID_KEY = "history_id"
 
 HISTORY_COLUMNS = [
@@ -231,6 +238,21 @@ class DecisionHistoryStore:
             if cursor.rowcount != 1:
                 raise ValueError("History record not found.")
 
+    def update_decision(
+        self,
+        history_id: int,
+        decision: HistoryDecisionValue,
+    ) -> None:
+        if decision not in HISTORY_DECISION_VALUES:
+            raise ValueError("History decisions must be HIT or NO HIT.")
+        with closing(self._connect()) as connection, connection:
+            cursor = connection.execute(
+                "UPDATE decisions SET decision = ? WHERE id = ?",
+                (decision, history_id),
+            )
+            if cursor.rowcount != 1:
+                raise ValueError("History record not found.")
+
     def clear(self) -> int:
         """Delete every persisted decision and return the number removed."""
         with closing(self._connect()) as connection, connection:
@@ -353,7 +375,12 @@ class DecisionXlsxExporter:
         sheet.title = "Comparison History"
         sheet.append([EXPORT_HEADERS[column] for column in DISPLAY_HISTORY_COLUMNS])
         for row in rows:
-            sheet.append([row[column] for column in DISPLAY_HISTORY_COLUMNS])
+            sheet.append(
+                [
+                    decision_label(row[column]) if column == "decision" else row[column]
+                    for column in DISPLAY_HISTORY_COLUMNS
+                ]
+            )
 
         header_fill = PatternFill("solid", fgColor="D9E3EC")
         for cell in sheet[1]:
@@ -407,6 +434,11 @@ def decision_record(decision: ReviewDecision) -> dict[str, str]:
     row.update(_transaction_fields("file_a", decision.file_a))
     row.update(_transaction_fields("file_b", decision.file_b))
     return row
+
+
+def decision_label(decision: str) -> str:
+    """Return the user-facing label for a stored decision value."""
+    return DECISION_LABELS.get(decision, decision.replace("_", " "))
 
 
 def _transaction_fields(prefix: str, transaction: NistTransaction) -> dict[str, str]:

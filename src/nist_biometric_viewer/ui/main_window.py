@@ -49,9 +49,11 @@ from nist_biometric_viewer.core.pairing import (
 from nist_biometric_viewer.core.review import (
     DecisionHistoryStore,
     DecisionXlsxExporter,
+    HistoryDecisionValue,
     ReviewDecision,
     ReviewDecisionValue,
     ReviewQueue,
+    decision_label,
     decision_record,
 )
 from nist_biometric_viewer.user_data import create_archive_temp_directory
@@ -85,6 +87,7 @@ class MainWindow(QMainWindow):
         self._thread: QThread | None = None
         self._worker: ArchiveWorker | ParseWorker | None = None
         self._processing_target: str | None = None
+        self._pending_loading_error: LoadingError | None = None
         self._file_a: NistTransaction | None = None
         self._file_b: NistTransaction | None = None
         self._review_queue = ReviewQueue()
@@ -382,12 +385,12 @@ class MainWindow(QMainWindow):
         bar.setObjectName("bottomDecisionBar")
         layout = QHBoxLayout(bar)
         layout.setContentsMargins(10, 6, 10, 6)
-        self.match_button = QPushButton("MATCH")
+        self.match_button = QPushButton("HIT")
         self.match_button.setObjectName("matchButton")
         self.match_button.setCheckable(True)
         self.match_button.setCursor(Qt.CursorShape.PointingHandCursor)
         self.match_button.clicked.connect(lambda: self._record_decision("MATCH"))
-        self.no_match_button = QPushButton("NO MATCH")
+        self.no_match_button = QPushButton("NO HIT")
         self.no_match_button.setObjectName("noMatchButton")
         self.no_match_button.setCheckable(True)
         self.no_match_button.setCursor(Qt.CursorShape.PointingHandCursor)
@@ -498,7 +501,7 @@ class MainWindow(QMainWindow):
 
     def start_comparison(self, file_a_path: Path, candidate_paths: list[Path]) -> None:
         """Start processing a complete one-to-many selection."""
-        if not candidate_paths:
+        if not candidate_paths or self._worker_is_running():
             return
         try:
             self._reset_to_initial_screen()
@@ -516,6 +519,8 @@ class MainWindow(QMainWindow):
 
     def start_archive_comparison(self, archive_path: Path) -> None:
         """Extract a complete one-to-many archive selection for user classification."""
+        if self._worker_is_running():
+            return
         self._reset_to_initial_screen()
         try:
             self._archive_temp_directory = create_archive_temp_directory()
@@ -532,6 +537,7 @@ class MainWindow(QMainWindow):
             return
         self.review_progress_label.setText(f"Preparing archive: {archive_path.name}")
         self._show_loading(f"Extracting archive: {archive_path.name}")
+        LOGGER.info("Archive loading started")
         try:
             self._start_archive_processing(
                 archive_path,
@@ -568,7 +574,7 @@ class MainWindow(QMainWindow):
         self._start_processing(file_a_path, "a")
 
     def _start_archive_processing(self, archive_path: Path, destination: Path) -> None:
-        if self._thread is not None and self._thread.isRunning():
+        if self._worker_is_running():
             return
         self._processing_target = "archive"
         self.new_comparison_action.setEnabled(False)
@@ -589,7 +595,7 @@ class MainWindow(QMainWindow):
         self._thread.start()
 
     def _start_processing(self, path: Path, target: str) -> None:
-        if self._thread is not None and self._thread.isRunning():
+        if self._worker_is_running():
             return
         self._processing_target = target
         self._candidate_ready = False
@@ -616,6 +622,7 @@ class MainWindow(QMainWindow):
         self._thread.start()
 
     def _archive_processing_finished(self, contents: ArchiveContents) -> None:
+        LOGGER.info("Archive extraction completed")
         self._archive_contents_after_thread = contents
 
     def _archive_processing_finished_safely(self, contents: ArchiveContents) -> None:
@@ -748,8 +755,17 @@ class MainWindow(QMainWindow):
         LOGGER.error("Loading failed: %s", error.log_details)
         thread = self._thread
         if thread is not None and thread.isRunning():
+            self._pending_loading_error = error
             thread.requestInterruption()
             thread.quit()
+            self._set_workspace_loading(False)
+            self._set_decision_buttons_enabled(False)
+            self.statusBar().showMessage("Stopping failed loading operation...")
+            return
+        self._recover_from_loading_error(error)
+
+    def _recover_from_loading_error(self, error: LoadingError) -> None:
+        """Restore the initial screen after any active worker has stopped."""
         self._set_workspace_loading(False)
         self._set_decision_buttons_enabled(False)
         self.new_comparison_action.setEnabled(True)
@@ -788,6 +804,11 @@ class MainWindow(QMainWindow):
         self._thread = None
         self._worker = None
         self._processing_target = None
+        pending_error = self._pending_loading_error
+        self._pending_loading_error = None
+        if pending_error is not None:
+            self._recover_from_loading_error(pending_error)
+            return
         archive_contents = self._archive_contents_after_thread
         self._archive_contents_after_thread = None
         if archive_contents is not None:
@@ -896,7 +917,7 @@ class MainWindow(QMainWindow):
             )
             return
         if previous is not None:
-            self.statusBar().showMessage(f"Decision updated: {decision}")
+            self.statusBar().showMessage(f"Decision updated: {decision_label(decision)}")
             return
         next_index = self._review_queue.next_undecided_index(candidate_index)
         if next_index is not None:
@@ -929,7 +950,8 @@ class MainWindow(QMainWindow):
                 "End the session anyway? Completed decisions remain in History."
             )
         else:
-            message = "End the current session? Completed decisions remain in History."
+            self._finish_current_session()
+            return
         response = QMessageBox.question(
             self,
             "End session",
@@ -1045,6 +1067,9 @@ class MainWindow(QMainWindow):
                 "Temporary files could not be removed. Cleanup will retry on next startup."
             )
 
+    def _worker_is_running(self) -> bool:
+        return self._thread is not None and self._thread.isRunning()
+
     def _update_review_status(self) -> None:
         total = self._review_queue.candidate_total
         current = self._review_queue.current_path
@@ -1121,7 +1146,7 @@ class MainWindow(QMainWindow):
                 continue
             decision = self._review_queue.decision_for_index(index)
             status = (
-                decision.decision.replace("_", " ")
+                decision_label(decision.decision)
                 if decision is not None
                 else "Not decided"
             )
@@ -1300,6 +1325,7 @@ class MainWindow(QMainWindow):
             rows,
             clear_history=self._delete_all_history_records,
             delete_record=self._delete_history_record,
+            change_decision=self._change_history_decision,
             export_history=self._export_history,
             total_count=total_count,
             load_page=lambda offset, limit: history_store.query(
@@ -1317,6 +1343,24 @@ class MainWindow(QMainWindow):
             if decision.history_id == history_id:
                 decision.history_id = None
         self.statusBar().showMessage("History record deleted")
+
+    def _change_history_decision(
+        self,
+        history_id: int,
+        decision_value: HistoryDecisionValue,
+    ) -> None:
+        if self._history_store is None:
+            raise OSError("History is unavailable.")
+        self._history_store.update_decision(history_id, decision_value)
+        for decision in self._review_queue.decisions:
+            if decision.history_id == history_id:
+                decision.decision = decision_value
+                self._update_pair_navigation()
+                self._update_decision_highlight()
+                break
+        self.statusBar().showMessage(
+            f"History decision changed to {decision_label(decision_value)}"
+        )
 
     def _delete_all_history_records(self) -> int:
         if self._history_store is None:

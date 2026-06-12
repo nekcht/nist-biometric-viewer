@@ -194,6 +194,20 @@ class ComparisonSetupDialog(QDialog):
 
     def set_source_selection(self, paths: list[Path]) -> None:
         """Identify a dropped or selected source as an archive or ANSI/NIST record group."""
+        try:
+            self._set_source_selection(paths)
+        except Exception as exc:
+            self._show_loading_error(
+                loading_error_from_exception(
+                    exc,
+                    title="Files could not be selected",
+                    user_message="The selected sources could not be prepared.",
+                    stage="file_selection",
+                    source=paths[0] if paths else None,
+                )
+            )
+
+    def _set_source_selection(self, paths: list[Path]) -> None:
         paths = list(dict.fromkeys(paths))
         is_archive = len(paths) == 1 and paths[0].suffix.casefold() in ARCHIVE_SUFFIXES
         is_record_group = bool(paths) and all(

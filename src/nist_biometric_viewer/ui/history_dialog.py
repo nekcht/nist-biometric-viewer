@@ -11,6 +11,7 @@ from PySide6.QtWidgets import (
     QAbstractItemView,
     QDialog,
     QHBoxLayout,
+    QInputDialog,
     QLabel,
     QMessageBox,
     QPushButton,
@@ -22,7 +23,10 @@ from PySide6.QtWidgets import (
 from nist_biometric_viewer.core.review import (
     DISPLAY_HISTORY_COLUMNS,
     EXPORT_HEADERS,
+    HISTORY_DECISION_VALUES,
     HISTORY_ID_KEY,
+    HistoryDecisionValue,
+    decision_label,
 )
 
 HISTORY_DIALOG_HEADERS = {
@@ -34,6 +38,7 @@ HISTORY_DIALOG_HEADERS = {
 }
 LOGGER = logging.getLogger(__name__)
 HISTORY_PAGE_SIZE = 50
+DECISION_COLUMN_INDEX = DISPLAY_HISTORY_COLUMNS.index("decision")
 
 
 class DecisionHistoryDialog(QDialog):
@@ -42,6 +47,7 @@ class DecisionHistoryDialog(QDialog):
         rows: list[dict[str, str]],
         clear_history: Callable[[], int] | None = None,
         delete_record: Callable[[int], None] | None = None,
+        change_decision: Callable[[int, HistoryDecisionValue], None] | None = None,
         export_history: Callable[[], None] | None = None,
         total_count: int | None = None,
         load_page: Callable[[int, int], list[dict[str, str]]] | None = None,
@@ -50,6 +56,7 @@ class DecisionHistoryDialog(QDialog):
         super().__init__(parent)
         self._clear_history = clear_history
         self._delete_record = delete_record
+        self._change_decision = change_decision
         self._export_history = export_history
         self._load_page = load_page
         self._all_rows = list(rows) if load_page is None else None
@@ -95,6 +102,10 @@ class DecisionHistoryDialog(QDialog):
         self.export_history_button.setCursor(Qt.CursorShape.PointingHandCursor)
         self.export_history_button.clicked.connect(self._export)
         button_row.addWidget(self.export_history_button)
+        self.change_decision_button = QPushButton("Change Decision...")
+        self.change_decision_button.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.change_decision_button.clicked.connect(self._change_selected_decision)
+        button_row.addWidget(self.change_decision_button)
         self.delete_selected_button = QPushButton("Delete Selected...")
         self.delete_selected_button.setObjectName("deleteHistoryButton")
         self.delete_selected_button.setCursor(Qt.CursorShape.PointingHandCursor)
@@ -145,6 +156,49 @@ class DecisionHistoryDialog(QDialog):
         self._total_count = max(self._total_count - 1, 0)
         self._page_index = min(self._page_index, self._last_page_index())
         self._show_page(self._page_index)
+
+    def _change_selected_decision(self) -> None:
+        if self._change_decision is None:
+            return
+        row_index = self.table.currentRow()
+        if row_index < 0:
+            return
+        id_item = self.table.item(row_index, 0)
+        decision_item = self.table.item(row_index, DECISION_COLUMN_INDEX)
+        if id_item is None or decision_item is None:
+            return
+        history_id = int(id_item.data(Qt.ItemDataRole.UserRole))
+        labels = [decision_label(value) for value in HISTORY_DECISION_VALUES]
+        current_index = max(labels.index(decision_item.text()), 0)
+        selected_label, accepted = QInputDialog.getItem(
+            self,
+            "Change decision",
+            "Decision",
+            labels,
+            current_index,
+            False,
+        )
+        if not accepted:
+            return
+        decision = HISTORY_DECISION_VALUES[labels.index(selected_label)]
+        if decision_label(decision) == decision_item.text():
+            return
+        try:
+            self._change_decision(history_id, decision)
+        except (OSError, ValueError, sqlite3.Error) as exc:
+            LOGGER.error("History decision update failed: %s", type(exc).__name__)
+            QMessageBox.critical(
+                self,
+                "Change failed",
+                "The history decision could not be changed.",
+            )
+            return
+        if self._all_rows is not None:
+            for row in self._all_rows:
+                if int(row[HISTORY_ID_KEY]) == history_id:
+                    row["decision"] = decision
+                    break
+        decision_item.setText(decision_label(decision))
 
     def _confirm_delete_history(self) -> None:
         if self._clear_history is None:
@@ -206,7 +260,8 @@ class DecisionHistoryDialog(QDialog):
         self.table.setRowCount(len(rows))
         for row_index, row in enumerate(rows):
             for column_index, column in enumerate(DISPLAY_HISTORY_COLUMNS):
-                item = QTableWidgetItem(row[column])
+                value = decision_label(row[column]) if column == "decision" else row[column]
+                item = QTableWidgetItem(value)
                 if column_index == 0:
                     item.setData(Qt.ItemDataRole.UserRole, int(row[HISTORY_ID_KEY]))
                 self.table.setItem(row_index, column_index, item)
@@ -229,6 +284,9 @@ class DecisionHistoryDialog(QDialog):
         self.export_history_button.setEnabled(has_rows and self._export_history is not None)
         self.delete_selected_button.setEnabled(
             self.table.currentRow() >= 0 and self._delete_record is not None
+        )
+        self.change_decision_button.setEnabled(
+            self.table.currentRow() >= 0 and self._change_decision is not None
         )
         self.delete_history_button.setEnabled(has_rows and self._clear_history is not None)
 

@@ -169,6 +169,63 @@ def test_loading_error_recovery_restores_usable_screen(tmp_path: Path, monkeypat
     application.processEvents()
 
 
+def test_loading_error_waits_for_active_worker_before_archive_cleanup(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    application = QApplication.instance() or QApplication([])
+    window = _window(tmp_path)
+    archive_temp = TemporaryDirectory(dir=tmp_path)
+    archive_temp_path = Path(archive_temp.name)
+    (archive_temp_path / "partial.nist").write_bytes(b"partial")
+    window._archive_temp_directory = archive_temp
+    shown: list[str] = []
+
+    class ActiveThread:
+        running = True
+        interruption_requested = False
+        quit_requested = False
+
+        def isRunning(self) -> bool:  # noqa: N802
+            return self.running
+
+        def requestInterruption(self) -> None:  # noqa: N802
+            self.interruption_requested = True
+
+        def quit(self) -> None:
+            self.quit_requested = True
+
+    thread = ActiveThread()
+    window._thread = thread  # type: ignore[assignment]
+    monkeypatch.setattr(
+        QMessageBox,
+        "exec",
+        lambda dialog: shown.append(dialog.windowTitle()) or 0,
+    )
+    error = LoadingError(
+        "Archive could not be opened",
+        "The selected archive is damaged or unsupported.",
+        stage="archive_extraction",
+    )
+
+    window.handle_loading_error(error)
+
+    assert thread.interruption_requested
+    assert thread.quit_requested
+    assert archive_temp_path.exists()
+    assert shown == []
+    assert window._pending_loading_error is error
+
+    thread.running = False
+    window._thread_finished()
+
+    assert not archive_temp_path.exists()
+    assert shown == ["Archive could not be opened"]
+    assert window._pending_loading_error is None
+    window.close()
+    application.processEvents()
+
+
 def test_log_sanitizer_omits_bytes_paths_and_encoded_data() -> None:
     secret = "A" * 100
     sanitized = sanitize_diagnostic(

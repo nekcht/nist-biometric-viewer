@@ -198,6 +198,16 @@ def test_internal_history_can_delete_record_by_hidden_history_id(tmp_path: Path)
     assert store.query()[0]["decision"] == "MATCH"
 
 
+def test_internal_history_can_change_decision_by_hidden_history_id(tmp_path: Path) -> None:
+    store = DecisionHistoryStore(tmp_path / "history.sqlite3")
+    decision = _decision(tmp_path, "1", "2026-06-10T08:00:00+00:00")
+    store.append(decision)
+
+    store.update_decision(decision.history_id, "NO_MATCH")
+
+    assert store.query()[0]["decision"] == "NO_MATCH"
+
+
 def test_internal_history_can_delete_all_records(tmp_path: Path) -> None:
     store = DecisionHistoryStore(tmp_path / "history.sqlite3")
     store.append(_decision(tmp_path, "1", "2026-06-10T08:00:00+00:00"))
@@ -285,7 +295,7 @@ def test_xlsx_export_contains_minimal_history_columns(tmp_path: Path) -> None:
     rows = list(workbook["Comparison History"].iter_rows(values_only=True))
     assert len(rows) == 2
     assert len(rows[0]) == len(DISPLAY_HISTORY_COLUMNS)
-    assert rows[1][2] == "NO_MATCH"
+    assert rows[1][2] == "NO HIT"
     assert rows[1][3] == "a-1.nist"
     assert rows[1][4] == "b-1.nist"
     assert rows[1][5] == "MN1-A-1"

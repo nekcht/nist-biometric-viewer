@@ -14,6 +14,7 @@ from tempfile import TemporaryDirectory
 from PySide6.QtCore import QStandardPaths
 
 APP_DATA_DIRECTORY_NAME = "NistBiometricViewer"
+INSTANCE_LOCK_FILENAME = ".nist-biometric-viewer.lock"
 LEGACY_APP_DATA_DIRECTORY_NAMES = ("nistBiometricViewer", "ForensicPrintComparator")
 USER_DATA_ROOT_ENV = "NIST_BIOMETRIC_VIEWER_USER_DATA_DIR"
 LEGACY_USER_DATA_ROOT_ENVS = ("FORENSICPRINT_COMPARATOR_USER_DATA_DIR",)
@@ -30,6 +31,11 @@ def get_user_data_dir() -> Path:
         return configured
 
     return _user_data_base() / APP_DATA_DIRECTORY_NAME
+
+
+def get_instance_lock_path() -> Path:
+    """Return the per-user lock file used to prevent concurrent app instances."""
+    return get_user_data_dir() / INSTANCE_LOCK_FILENAME
 
 
 def get_legacy_user_data_dirs() -> list[Path]:

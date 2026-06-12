@@ -11,6 +11,7 @@ from PySide6.QtWidgets import (
     QApplication,
     QFileDialog,
     QGroupBox,
+    QInputDialog,
     QLabel,
     QMessageBox,
     QPushButton,
@@ -276,6 +277,8 @@ def test_main_window_has_professional_menus_without_toolbars(tmp_path) -> None:
     assert window.match_button.cursor().shape() == Qt.CursorShape.PointingHandCursor
     assert window.no_match_button.cursor().shape() == Qt.CursorShape.PointingHandCursor
     assert window.pass_button.cursor().shape() == Qt.CursorShape.PointingHandCursor
+    assert window.match_button.text() == "HIT"
+    assert window.no_match_button.text() == "NO HIT"
     assert window.pass_button.text() == "PASS"
     assert window.view_history_action.text() == "Open History..."
     assert window.end_session_action.text() == "End Session"
@@ -391,6 +394,9 @@ def test_empty_states_use_short_wording() -> None:
 def test_destructive_confirmations_remain_concise(tmp_path, monkeypatch) -> None:
     application = QApplication.instance() or QApplication([])
     window = _window(tmp_path)
+    file_a = NistTransaction(source_path=tmp_path / "a.nist")
+    file_b = NistTransaction(source_path=tmp_path / "b.nist")
+    window._review_queue.start(file_a, [file_b.source_path])
     window._candidate_ready = True
     end_prompt: list[tuple[str, str]] = []
     delete_prompt: list[tuple[str, str]] = []
@@ -412,7 +418,11 @@ def test_destructive_confirmations_remain_concise(tmp_path, monkeypatch) -> None
     dialog._confirm_delete_history()
 
     assert end_prompt == [
-        ("End session", "End the current session? Completed decisions remain in History.")
+        (
+            "End session",
+            "1 comparison pair has no decision. End the session anyway? "
+            "Completed decisions remain in History.",
+        )
     ]
     assert delete_prompt == [
         ("Delete history", "Delete all history? This cannot be undone.")
@@ -619,6 +629,31 @@ def test_setup_dialog_accepts_dragged_record_group_and_zip(tmp_path, monkeypatch
     assert dialog.source_list.count() == 1
     assert dialog.source_list.item(0).text() == f"ZIP Archive: {archive}"
     assert not hasattr(dialog, "archive_edit")
+    dialog.close()
+    application.processEvents()
+
+
+def test_setup_dialog_converts_unexpected_drop_failure_to_controlled_error(
+    tmp_path,
+    monkeypatch,
+) -> None:
+    application = QApplication.instance() or QApplication([])
+    archive = tmp_path / "records.zip"
+    archive.write_bytes(b"archive")
+    dialog = ComparisonSetupDialog(tmp_path)
+    errors: list[object] = []
+    monkeypatch.setattr(
+        "nist_biometric_viewer.ui.setup_dialog.validate_loading_file",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(RuntimeError("shell race")),
+    )
+    dialog._show_loading_error = errors.append
+
+    dialog.set_source_selection([archive])
+
+    assert len(errors) == 1
+    assert errors[0].title == "Files could not be selected"
+    assert errors[0].stage == "file_selection"
+    assert errors[0].original_exception_type == "RuntimeError"
     dialog.close()
     application.processEvents()
 
@@ -957,10 +992,10 @@ def test_pair_navigation_shows_and_allows_changing_decisions(tmp_path) -> None:
     assert window.pair_navigation_list.item(0).sizeHint().height() == 28
     assert (
         window.pair_navigation_list.item(0).data(Qt.ItemDataRole.AccessibleTextRole)
-        == "1. b1.nist | MATCH"
+        == "1. b1.nist | HIT"
     )
     assert window._pair_navigation_rows[0][0].text() == "1. b1.nist"
-    assert window._pair_navigation_rows[0][1].text() == "MATCH"
+    assert window._pair_navigation_rows[0][1].text() == "HIT"
     assert window._pair_navigation_rows[0][1].property("decision") == "MATCH"
     assert window._pair_navigation_rows[1][1].property("decision") == "UNDECIDED"
     assert not window.match_button.isChecked()
@@ -976,7 +1011,7 @@ def test_pair_navigation_shows_and_allows_changing_decisions(tmp_path) -> None:
     assert window.no_match_button.isChecked()
     assert not window.match_button.isChecked()
     assert window.pair_navigation_list.item(0).text() == ""
-    assert window._pair_navigation_rows[0][1].text() == "NO MATCH"
+    assert window._pair_navigation_rows[0][1].text() == "NO HIT"
     assert window._pair_navigation_rows[0][1].property("decision") == "NO_MATCH"
     window.close()
     application.processEvents()
@@ -1281,9 +1316,7 @@ def test_session_export_prompt_can_be_disabled(tmp_path, monkeypatch) -> None:
     window._end_current_session()
 
     assert "Session ended" in window.statusBar().currentMessage()
-    assert prompts == [
-        ("End session", "End the current session? Completed decisions remain in History.")
-    ]
+    assert prompts == []
     window.close()
     application.processEvents()
 
@@ -1303,7 +1336,7 @@ def test_history_dialog_displays_current_database_records(tmp_path) -> None:
 
     assert dialog.table.rowCount() == 1
     assert dialog.table.item(0, 1).text() == "UTC"
-    assert dialog.table.item(0, 2).text() == "NO_MATCH"
+    assert dialog.table.item(0, 2).text() == "NO HIT"
     headers = [
         dialog.table.horizontalHeaderItem(index).text()
         for index in range(dialog.table.columnCount())
@@ -1314,6 +1347,8 @@ def test_history_dialog_displays_current_database_records(tmp_path) -> None:
     assert dialog.summary_label.text() == "1 decision"
     assert dialog.export_history_button.text() == "Export..."
     assert not dialog.export_history_button.isEnabled()
+    assert dialog.change_decision_button.text() == "Change Decision..."
+    assert not dialog.change_decision_button.isEnabled()
     assert dialog.delete_selected_button.text() == "Delete Selected..."
     assert not dialog.delete_selected_button.isEnabled()
     assert dialog.delete_history_button.text() == "Delete History..."
@@ -1381,6 +1416,40 @@ def test_history_dialog_exports_only_through_its_export_button(tmp_path) -> None
     dialog.export_history_button.click()
 
     assert exported == [True]
+    dialog.close()
+    window.close()
+    application.processEvents()
+
+
+def test_history_dialog_can_change_selected_decision_and_active_session(
+    tmp_path,
+    monkeypatch,
+) -> None:
+    application = QApplication.instance() or QApplication([])
+    file_a = NistTransaction(source_path=tmp_path / "a.nist")
+    file_b = NistTransaction(source_path=tmp_path / "b.nist")
+    window = _window(tmp_path)
+    window._review_queue.start(file_a, [file_b.source_path])
+    decision = window._review_queue.record("MATCH", file_b)
+    window._history_store.append(decision)
+    monkeypatch.setattr(
+        QInputDialog,
+        "getItem",
+        lambda *args: ("NO HIT", True),
+    )
+    dialog = DecisionHistoryDialog(
+        window._history_store.query(),
+        change_decision=window._change_history_decision,
+    )
+
+    dialog.table.selectRow(0)
+    assert dialog.change_decision_button.isEnabled()
+    dialog.change_decision_button.click()
+
+    assert dialog.table.item(0, 2).text() == "NO HIT"
+    assert window._history_store.query()[0]["decision"] == "NO_MATCH"
+    assert decision.decision == "NO_MATCH"
+    assert window.statusBar().currentMessage() == "History decision changed to NO HIT"
     dialog.close()
     window.close()
     application.processEvents()
