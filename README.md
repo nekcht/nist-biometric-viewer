@@ -7,6 +7,8 @@ transaction files. It compares one **Reference Record** against one or more
 The app is for visual review only. It does not perform automated biometric matching,
 identity verification, or identity decisions.
 
+Link to Windows Installer: https://drive.google.com/file/d/177gHtteaofmw9BV4uV39DkFUrj7xN1Q_/view?usp=sharing
+
 ## Current Support
 
 ANSI/NIST records:
