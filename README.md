@@ -4,12 +4,9 @@ A local Windows desktop tool for visually reviewing biometric images inside ANSI
 transaction files. It compares one **Reference Record** against one or more
 **Comparison Records**.
 
-The app is for visual review only. It does not perform automated biometric matching,
-identity verification, or identity decisions.
+The app is for visual review of fingerprints only. It does not perform automated biometric matching, identity verification, or identity decisions.
 
 Requires Windows 10 or newer.
-
-Link to Windows Installer: https://drive.google.com/file/d/1U8XlZZQ8vVqeCWIUPQigEtdImekPBOHk/view?usp=sharing
 
 ## Current Support
 
