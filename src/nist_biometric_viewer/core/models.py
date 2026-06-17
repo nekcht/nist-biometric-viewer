@@ -12,15 +12,53 @@ Hand = Literal["left", "right", "unknown"]
 DecodeStatus = Literal["decoded", "unsupported", "failed", "not_present"]
 RecordSupportStatus = Literal["supported", "partial", "unsupported"]
 CompatibilityStatus = Literal["Compatible", "Partial", "Unsupported", "Failed"]
+BiometricModality = Literal[
+    "fingerprint",
+    "palm",
+    "photo",
+    "iris",
+    "signature",
+    "other",
+    "unknown",
+]
+BiometricWorkflow = Literal[
+    "fingerprint_review",
+    "photo_review",
+    "palm_review",
+    "iris_review",
+    "other_review",
+]
+ClassificationBasis = Literal[
+    "record_type",
+    "field",
+    "record_type_and_field",
+    "unknown",
+]
+
+
+@dataclass(frozen=True, slots=True)
+class BiometricClassification:
+    modality: BiometricModality = "unknown"
+    compatible_workflows: tuple[BiometricWorkflow, ...] = ()
+    basis: ClassificationBasis = "unknown"
+
+
+@dataclass(frozen=True, slots=True)
+class SkippedBiometricRecord:
+    record_type: int
+    modality: BiometricModality
+    reason: str = "Skipped from review."
 
 
 @dataclass(frozen=True, slots=True)
 class CompatibilitySummary:
     status: CompatibilityStatus
+    review_workflow: BiometricWorkflow | None
     version: str | None
     transaction_type: str | None
     total_records: int
     supported_biometric_image_records: int
+    skipped_biometric_record_count: int
     unsupported_record_count: int
     unsupported_record_types: tuple[int, ...]
     unavailable_record_type_count: int
@@ -50,11 +88,17 @@ class CompatibilitySummary:
         lines.extend(
             [
                 f"Records: {self.total_records}",
-                f"Supported images: {self.supported_biometric_image_records}",
+                (
+                    f"Fingerprint impressions: {self.supported_biometric_image_records}"
+                    if self.review_workflow == "fingerprint_review"
+                    else f"Supported images: {self.supported_biometric_image_records}"
+                ),
                 _unsupported_summary_text(self),
                 f"Warnings: {self.warning_count}",
             ]
         )
+        if self.skipped_biometric_record_count:
+            lines.append("Non-fingerprint records skipped.")
         if self.partial_record_types:
             lines.append(f"Partial support: {self.partial_records_text}")
         return separator.join(lines)
@@ -70,6 +114,10 @@ class NistRecord:
     raw_end_offset: int | None = None
     warnings: list[str] = field(default_factory=list)
     support_status: RecordSupportStatus = "supported"
+    biometric_classification: BiometricClassification = field(
+        default_factory=BiometricClassification
+    )
+    review_skip_reason: str | None = None
 
 
 @dataclass(slots=True)
@@ -93,6 +141,9 @@ class BiometricImage:
     decoded_pil_image: Image.Image | None = field(default=None, repr=False)
     decode_status: DecodeStatus = "not_present"
     warnings: list[str] = field(default_factory=list)
+    biometric_classification: BiometricClassification = field(
+        default_factory=BiometricClassification
+    )
 
 
 @dataclass(slots=True)
@@ -106,6 +157,11 @@ class NistTransaction:
     descriptive_metadata: dict[str, str] = field(default_factory=dict, repr=False)
     warnings: list[str] = field(default_factory=list)
     inspection_failed: bool = field(default=False, repr=False)
+    review_workflow: BiometricWorkflow | None = None
+    skipped_biometric_records: list[SkippedBiometricRecord] = field(
+        default_factory=list,
+        repr=False,
+    )
 
     @property
     def reference_number(self) -> str:
@@ -114,14 +170,19 @@ class NistTransaction:
 
     @property
     def compatibility_summary(self) -> CompatibilitySummary:
+        reviewed_records = [
+            record for record in self.records if record.review_skip_reason is None
+        ]
         unsupported_records = [
-            record for record in self.records if record.support_status == "unsupported"
+            record
+            for record in reviewed_records
+            if record.support_status == "unsupported"
         ]
         partial_record_types = tuple(
             sorted(
                 {
                     record.record_type
-                    for record in self.records
+                    for record in reviewed_records
                     if record.support_status == "partial"
                 }
             )
@@ -145,10 +206,12 @@ class NistTransaction:
             status = "Unsupported"
         return CompatibilitySummary(
             status=status,
+            review_workflow=self.review_workflow,
             version=self.version,
             transaction_type=self.transaction_type,
             total_records=len(self.records),
             supported_biometric_image_records=len(self.biometric_images),
+            skipped_biometric_record_count=len(self.skipped_biometric_records),
             unsupported_record_count=len(unsupported_records),
             unsupported_record_types=unsupported_record_types,
             unavailable_record_type_count=unavailable_record_type_count,
@@ -187,6 +250,7 @@ def metadata_display_rows(image: BiometricImage) -> list[tuple[str, Any]]:
     """Return the standard compact metadata rows shown by the UI."""
     return [
         ("Record type", image.record_type),
+        ("Modality", _display_modality(image.biometric_classification.modality)),
         ("IDC", image.idc),
         ("Position code", image.finger_position_code),
         ("Finger", image.finger_name),
@@ -207,6 +271,10 @@ def _dimensions(width: int | None, height: int | None) -> str | None:
     if width is None and height is None:
         return None
     return f"{width or '?'} x {height or '?'}"
+
+
+def _display_modality(modality: BiometricModality) -> str:
+    return modality.replace("_", " ").title()
 
 
 def _unsupported_summary_text(summary: CompatibilitySummary) -> str:

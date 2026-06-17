@@ -6,6 +6,7 @@ import logging
 import re
 from pathlib import Path
 
+from nist_biometric_viewer.core.biometrics import classify_nist_record
 from nist_biometric_viewer.core.errors import NistParseError
 from nist_biometric_viewer.core.models import NistRecord, NistTransaction
 
@@ -143,6 +144,7 @@ class NistParser:
         elif record.record_type not in SUPPORTED_RECORD_TYPES:
             record.support_status = "unsupported"
             record.warnings.append(f"Unsupported Type-{record.record_type} record.")
+        record.biometric_classification = classify_nist_record(record)
         return record
 
     def _parse_tagged_fields(

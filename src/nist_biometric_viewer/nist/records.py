@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from nist_biometric_viewer.core.biometrics import classify_nist_fields
 from nist_biometric_viewer.core.models import BiometricImage, NistRecord
 from nist_biometric_viewer.core.pairing import finger_details
 
@@ -39,6 +40,7 @@ def biometric_from_tagged(record: NistRecord) -> BiometricImage:
         image_bytes=image_bytes,
         decode_status="not_present" if image_bytes is None else "unsupported",
         warnings=list(record.warnings),
+        biometric_classification=classify_nist_fields(record.record_type, position),
     )
 
 
@@ -68,6 +70,7 @@ def biometric_from_binary_type4(record: NistRecord, raw_record: bytes) -> Biomet
         image_bytes=payload,
         decode_status="unsupported" if payload else "not_present",
         warnings=warnings,
+        biometric_classification=classify_nist_fields(4, position),
     )
 
 

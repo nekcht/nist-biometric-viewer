@@ -106,6 +106,16 @@ class ReviewQueue:
             raise IndexError("Comparison Record index is out of range.")
         self.current_index = index
 
+    def remove_current_candidate(self) -> Path | None:
+        if self.current_path is None:
+            return None
+        skipped_path = self.candidate_paths.pop(self.current_index)
+        if not self.candidate_paths:
+            self.current_index = -1
+        elif self.current_index >= len(self.candidate_paths):
+            self.current_index = len(self.candidate_paths) - 1
+        return skipped_path
+
     def decision_for_index(self, index: int) -> ReviewDecision | None:
         candidate_number = index + 1
         return next(

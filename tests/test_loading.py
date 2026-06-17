@@ -4,6 +4,7 @@ import sqlite3
 from pathlib import Path
 from tempfile import TemporaryDirectory
 from types import SimpleNamespace
+from zipfile import ZipFile
 
 import pytest
 
@@ -20,6 +21,7 @@ from nist_biometric_viewer.core.loading import (
 from nist_biometric_viewer.core.models import BiometricImage, NistTransaction
 from nist_biometric_viewer.core.review import DecisionHistoryStore
 from nist_biometric_viewer.logging_config import SanitizingLogFilter
+from nist_biometric_viewer.nist.separators import FS_BYTES, GS_BYTES
 from nist_biometric_viewer.ui.main_window import MainWindow
 from nist_biometric_viewer.ui.settings import HISTORY_DATABASE_FILENAME, AppSettings
 from nist_biometric_viewer.ui.worker import ArchiveWorker, ParseWorker
@@ -32,6 +34,17 @@ def _window(tmp_path: Path) -> MainWindow:
         settings=AppSettings(settings),
         history_store=DecisionHistoryStore(tmp_path / "history.sqlite3"),
     )
+
+
+def _tagged_record(record_type: int, fields: list[tuple[str, bytes]]) -> bytes:
+    length = 0
+    while True:
+        parts = [f"{record_type}.001:{length}".encode()]
+        parts.extend(f"{record_type}.{number}:".encode() + value for number, value in fields)
+        record = GS_BYTES.join(parts) + FS_BYTES
+        if len(record) == length:
+            return record
+        length = len(record)
 
 
 @pytest.mark.parametrize("name", ["missing.nist", "empty.nist"])
@@ -64,6 +77,39 @@ def test_archive_worker_emits_loading_error_instead_of_raising(tmp_path: Path) -
     assert errors[0].stage == "archive_extraction"
 
 
+def test_archive_worker_filters_non_fingerprint_records_before_reference_selection(
+    tmp_path: Path,
+) -> None:
+    archive_path = tmp_path / "records.zip"
+    with ZipFile(archive_path, "w") as archive:
+        archive.writestr(
+            "fingerprint.nist",
+            _tagged_record(
+                14,
+                [("002", b"1"), ("013", b"7"), ("999", b"fingerprint")],
+            ),
+        )
+        archive.writestr(
+            "face.nist",
+            _tagged_record(
+                10,
+                [("002", b"2"), ("003", b"FACE"), ("999", b"SECRET-FACE-PAYLOAD")],
+            ),
+        )
+    finished = []
+    errors: list[LoadingError] = []
+    worker = ArchiveWorker(archive_path, tmp_path / "extracted")
+    worker.finished.connect(finished.append)
+    worker.failed.connect(errors.append)
+
+    worker.run()
+
+    assert errors == []
+    assert len(finished) == 1
+    assert [path.name for path in finished[0].nist_paths] == ["fingerprint.nist"]
+    assert finished[0].skipped_non_fingerprint_count == 1
+
+
 def test_parser_fatal_failure_emits_controlled_loading_error(
     tmp_path: Path,
     monkeypatch,
@@ -84,6 +130,38 @@ def test_parser_fatal_failure_emits_controlled_loading_error(
     assert errors[0].title == "Record could not be loaded"
     assert errors[0].stage == "nist_parsing"
     assert errors[0].original_exception_type == "ValueError"
+
+
+def test_parse_worker_finishes_non_fingerprint_record_without_payload_details(
+    tmp_path: Path,
+) -> None:
+    path = tmp_path / "photo-only.nist"
+    path.write_bytes(
+        _tagged_record(
+            10,
+            [
+                ("002", b"1"),
+                ("003", b"FACE"),
+                ("999", b"SECRET-BIOMETRIC-PAYLOAD"),
+            ],
+        )
+    )
+    finished: list[NistTransaction] = []
+    errors: list[LoadingError] = []
+    worker = ParseWorker(path)
+    worker.finished.connect(finished.append)
+    worker.failed.connect(errors.append)
+
+    worker.run()
+
+    assert errors == []
+    assert len(finished) == 1
+    assert finished[0].biometric_images == []
+    assert finished[0].skipped_biometric_records
+    summary = finished[0].compatibility_summary.compact_text()
+    assert "No fingerprint impressions found." not in summary
+    assert "Non-fingerprint records skipped." in summary
+    assert "SECRET-BIOMETRIC-PAYLOAD" not in summary
 
 
 def test_decoder_failure_becomes_image_warning(tmp_path: Path, monkeypatch) -> None:

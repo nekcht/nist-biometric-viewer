@@ -21,6 +21,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+from nist_biometric_viewer.core.fingerprint_filter import filter_fingerprint_source_paths
 from nist_biometric_viewer.core.loading import (
     LoadingError,
     loading_error_from_exception,
@@ -53,6 +54,7 @@ class ComparisonSetupDialog(QDialog):
         self._initial_directory = initial_directory or Path.home()
         self._record_paths: list[Path] = []
         self._archive_path: Path | None = None
+        self._skipped_non_fingerprint_count = 0
 
         layout = QVBoxLayout(self)
         self.phase_stack = QStackedWidget()
@@ -125,6 +127,10 @@ class ComparisonSetupDialog(QDialog):
         introduction.setObjectName("referenceGuidance")
         introduction.setWordWrap(True)
         layout.addWidget(introduction)
+        self.reference_status = QLabel("")
+        self.reference_status.setObjectName("referenceStatus")
+        self.reference_status.setWordWrap(True)
+        layout.addWidget(self.reference_status)
 
         self.reference_list = ReferenceRecordList()
         self.reference_list.setCursor(Qt.CursorShape.PointingHandCursor)
@@ -178,10 +184,13 @@ class ComparisonSetupDialog(QDialog):
         self,
         record_paths: list[Path],
         reference_path: Path | None = None,
+        *,
+        skipped_non_fingerprint_count: int = 0,
     ) -> None:
         """Populate one record group and optionally appoint its Reference Record."""
         self._archive_path = None
         self._record_paths = list(dict.fromkeys(record_paths))
+        self._skipped_non_fingerprint_count = skipped_non_fingerprint_count
         self._refresh_reference_choices(reference_path)
         self._refresh_source_list()
 
@@ -189,6 +198,7 @@ class ComparisonSetupDialog(QDialog):
         """Populate one ZIP or RAR archive, primarily for repeatable UI testing."""
         self._record_paths.clear()
         self._archive_path = archive_path
+        self._skipped_non_fingerprint_count = 0
         self._refresh_reference_choices()
         self._refresh_source_list()
 
@@ -231,7 +241,15 @@ class ComparisonSetupDialog(QDialog):
             return
         if is_record_group:
             existing_paths = self._record_paths if self._archive_path is None else []
-            self.set_record_selection([*existing_paths, *paths], self.file_a_path)
+            candidate_paths = [path for path in paths if path not in existing_paths]
+            filtered = filter_fingerprint_source_paths(candidate_paths)
+            self.set_record_selection(
+                [*existing_paths, *filtered.fingerprint_paths],
+                self.file_a_path,
+                skipped_non_fingerprint_count=(
+                    self._skipped_non_fingerprint_count + filtered.skipped_count
+                ),
+            )
             return
 
     def _show_loading_error(self, error: LoadingError) -> None:
@@ -268,6 +286,7 @@ class ComparisonSetupDialog(QDialog):
     def _clear_sources(self) -> None:
         self._record_paths.clear()
         self._archive_path = None
+        self._skipped_non_fingerprint_count = 0
         self._refresh_reference_choices()
         self._refresh_source_list()
 
@@ -275,6 +294,7 @@ class ComparisonSetupDialog(QDialog):
         previous_reference = reference_path or self.file_a_path
         self.reference_list.set_paths(self._record_paths, previous_reference)
         self.reference_list.setEnabled(bool(self._record_paths))
+        self._update_reference_status()
         self._update_reference_navigation()
 
     def _refresh_source_list(self) -> None:
@@ -284,20 +304,31 @@ class ComparisonSetupDialog(QDialog):
             item = QListWidgetItem(f"{archive_type} Archive: {self._archive_path}")
             item.setToolTip(str(self._archive_path))
             self.source_list.addItem(item)
-            self.source_status.setText(
-                f"{archive_type} archive selected"
-            )
+            self.source_status.setText(f"{archive_type} archive selected")
             return
         for path in self._record_paths:
             item = QListWidgetItem(f"ANSI/NIST Record: {path}")
             item.setToolTip(str(path))
             self.source_list.addItem(item)
-        if self._record_paths:
-            self.source_status.setText(
-                f"Records selected: {len(self._record_paths)}"
+        self.source_status.setText(self._source_status_text())
+
+    def _source_status_text(self) -> str:
+        if not self._record_paths and not self._skipped_non_fingerprint_count:
+            return "No records selected"
+        details = [f"Records selected: {len(self._record_paths)}"]
+        if self._skipped_non_fingerprint_count:
+            details.append(
+                f"Non-fingerprint records skipped: {self._skipped_non_fingerprint_count}"
+            )
+        return " | ".join(details)
+
+    def _update_reference_status(self) -> None:
+        if self._skipped_non_fingerprint_count:
+            self.reference_status.setText(
+                f"Non-fingerprint records skipped: {self._skipped_non_fingerprint_count}"
             )
         else:
-            self.source_status.setText("No records selected")
+            self.reference_status.setText("")
 
     def _selection_directory(self) -> Path:
         if self._archive_path is not None:
@@ -348,10 +379,16 @@ class ComparisonSetupDialog(QDialog):
             return True
         if len(self._record_paths) >= 2:
             return True
+        message = "Select one ZIP/RAR archive or at least two ANSI/NIST records."
+        if self._skipped_non_fingerprint_count:
+            message = (
+                f"{message}\n"
+                f"Non-fingerprint records skipped: {self._skipped_non_fingerprint_count}"
+            )
         QMessageBox.information(
             self,
             "Records required",
-            "Select one ZIP/RAR archive or at least two ANSI/NIST records.",
+            message,
         )
         return False
 

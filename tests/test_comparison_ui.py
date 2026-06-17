@@ -21,9 +21,11 @@ from PySide6.QtWidgets import (
 from nist_biometric_viewer import __version__
 from nist_biometric_viewer.core.models import BiometricImage, NistRecord
 from nist_biometric_viewer.core.models import NistTransaction
+from nist_biometric_viewer.core.models import SkippedBiometricRecord
 from nist_biometric_viewer.core.archive import ArchiveComparisonSelection, ArchiveContents
 from nist_biometric_viewer.core.pairing import build_cross_file_comparison, finger_details
 from nist_biometric_viewer.core.review import DecisionHistoryStore
+from nist_biometric_viewer.nist.separators import FS_BYTES, GS_BYTES
 from nist_biometric_viewer.ui.about_dialog import ABOUT_TEXT, AboutDialog
 from nist_biometric_viewer.ui.archive_reference_dialog import (
     ArchiveReferenceDialog,
@@ -62,6 +64,17 @@ def _image(code: str) -> BiometricImage:
         hand=hand,  # type: ignore[arg-type]
         decode_status="unsupported",
     )
+
+
+def _tagged_record(record_type: int, fields: list[tuple[str, bytes]]) -> bytes:
+    length = 0
+    while True:
+        parts = [f"{record_type}.001:{length}".encode()]
+        parts.extend(f"{record_type}.{number}:".encode() + value for number, value in fields)
+        record = GS_BYTES.join(parts) + FS_BYTES
+        if len(record) == length:
+            return record
+        length = len(record)
 
 
 def _history_row(index: int) -> dict[str, str]:
@@ -254,7 +267,9 @@ def test_single_setup_starts_reference_loading_and_uses_internal_history(tmp_pat
     assert window.loading_progress.maximum() == 0
 
     window._processing_target = "a"
-    window._processing_finished(NistTransaction(source_path=file_a_path))
+    window._processing_finished(
+        NistTransaction(source_path=file_a_path, biometric_images=[_image("1")])
+    )
     assert window._start_candidate_after_thread
     window.close()
     application.processEvents()
@@ -397,6 +412,39 @@ def test_record_sidebar_shows_compact_compatibility_summary(tmp_path) -> None:
     application.processEvents()
 
 
+def test_record_sidebar_shows_fingerprint_review_skip_summary(tmp_path) -> None:
+    application = QApplication.instance() or QApplication([])
+    window = _window(tmp_path)
+    transaction = NistTransaction(
+        source_path=tmp_path / "record.nist",
+        review_workflow="fingerprint_review",
+        records=[
+            NistRecord(record_type=14),
+            NistRecord(
+                record_type=10,
+                support_status="unsupported",
+                review_skip_reason="Skipped from fingerprint review.",
+                fields={"10.999": b"SECRET-BIOMETRIC-PAYLOAD"},
+            ),
+        ],
+        biometric_images=[_image("2")],
+        skipped_biometric_records=[
+            SkippedBiometricRecord(record_type=10, modality="photo"),
+        ],
+    )
+
+    window._update_file_sidebar(window.file_a_widgets, transaction)
+
+    summary = window.file_a_widgets["summary"].text()
+    assert "Compatibility: Compatible" in summary
+    assert "Fingerprint impressions: 1" in summary
+    assert "Non-fingerprint records skipped." in summary
+    assert "Unsupported: 0" in summary
+    assert "SECRET-BIOMETRIC-PAYLOAD" not in summary
+    window.close()
+    application.processEvents()
+
+
 def test_empty_states_use_short_wording() -> None:
     application = QApplication.instance() or QApplication([])
     grid = ComparisonGrid()
@@ -532,14 +580,18 @@ def test_workspace_appears_only_after_first_complete_pair(tmp_path) -> None:
     assert window.page_stack.currentWidget() is not window.workspace_page
 
     window._processing_target = "a"
-    window._processing_finished(NistTransaction(source_path=file_a_path))
+    window._processing_finished(
+        NistTransaction(source_path=file_a_path, biometric_images=[_image("1")])
+    )
     assert window.page_stack.currentWidget() is window.loading_page
     window._thread_finished()
     assert requested[-1] == (file_b_path, "b")
     assert window.page_stack.currentWidget() is window.loading_page
 
     window._processing_target = "b"
-    window._processing_finished(NistTransaction(source_path=file_b_path))
+    window._processing_finished(
+        NistTransaction(source_path=file_b_path, biometric_images=[_image("1")])
+    )
     assert window.page_stack.currentWidget() is window.workspace_page
     assert not window._workspace_loading
     assert window.workspace_page.isEnabled()
@@ -550,6 +602,118 @@ def test_workspace_appears_only_after_first_complete_pair(tmp_path) -> None:
     assert maximized == [True]
     application.processEvents()
     assert fitted
+    window.close()
+    application.processEvents()
+
+
+def test_non_fingerprint_comparison_record_is_skipped_and_next_record_loads(
+    tmp_path,
+) -> None:
+    application = QApplication.instance() or QApplication([])
+    file_a_path = tmp_path / "a.nist"
+    photo_path = tmp_path / "photo.nist"
+    finger_path = tmp_path / "finger.nist"
+    for path in (file_a_path, photo_path, finger_path):
+        path.write_bytes(path.name.encode())
+    window = _window(tmp_path)
+    requested: list[tuple[Path, str]] = []
+    window._start_processing = lambda path, target: requested.append((path, target))
+
+    window.start_comparison(file_a_path, [photo_path, finger_path])
+    window._processing_target = "a"
+    window._processing_finished(
+        NistTransaction(
+            source_path=file_a_path,
+            review_workflow="fingerprint_review",
+            biometric_images=[_image("1")],
+        )
+    )
+    window._thread_finished()
+    assert requested[-1] == (photo_path, "b")
+
+    window._processing_target = "b"
+    window._processing_finished(
+        NistTransaction(
+            source_path=photo_path,
+            review_workflow="fingerprint_review",
+            skipped_biometric_records=[
+                SkippedBiometricRecord(record_type=10, modality="photo"),
+            ],
+        )
+    )
+    assert window._review_queue.candidate_paths == [finger_path]
+    assert window._skipped_candidate_paths == [photo_path]
+    assert window.page_stack.currentWidget() is window.loading_page
+
+    window._thread_finished()
+    assert requested[-1] == (finger_path, "b")
+
+    window._processing_target = "b"
+    window._processing_finished(
+        NistTransaction(
+            source_path=finger_path,
+            review_workflow="fingerprint_review",
+            biometric_images=[_image("1")],
+        )
+    )
+
+    assert window.page_stack.currentWidget() is window.workspace_page
+    assert "Non-fingerprint records skipped: 1" in window.statusBar().currentMessage()
+    assert window.pair_navigation_list.count() == 1
+    assert window._file_b.source_path == finger_path
+    window.close()
+    application.processEvents()
+
+
+def test_all_non_fingerprint_comparison_records_show_information_notice(
+    tmp_path,
+    monkeypatch,
+) -> None:
+    application = QApplication.instance() or QApplication([])
+    file_a_path = tmp_path / "a.nist"
+    photo_path = tmp_path / "photo.nist"
+    file_a_path.write_bytes(b"a")
+    photo_path.write_bytes(b"photo")
+    window = _window(tmp_path)
+    requested: list[tuple[Path, str]] = []
+    notices: list[tuple[str, str]] = []
+    window._start_processing = lambda path, target: requested.append((path, target))
+    monkeypatch.setattr(
+        QMessageBox,
+        "information",
+        lambda _parent, title, message: notices.append((title, message)),
+    )
+
+    window.start_comparison(file_a_path, [photo_path])
+    window._processing_target = "a"
+    window._processing_finished(
+        NistTransaction(
+            source_path=file_a_path,
+            review_workflow="fingerprint_review",
+            biometric_images=[_image("1")],
+        )
+    )
+    window._thread_finished()
+    assert requested[-1] == (photo_path, "b")
+
+    window._processing_target = "b"
+    window._processing_finished(
+        NistTransaction(
+            source_path=photo_path,
+            review_workflow="fingerprint_review",
+            skipped_biometric_records=[
+                SkippedBiometricRecord(record_type=10, modality="photo"),
+            ],
+        )
+    )
+    window._thread_finished()
+
+    assert notices == [
+        ("No fingerprint impressions found", "No fingerprint impressions found.")
+    ]
+    assert window.page_stack.currentWidget() is window.setup_page
+    assert window._review_queue.candidate_paths == []
+    assert "Ready for a new comparison" in window.statusBar().currentMessage()
     window.close()
     application.processEvents()
 
@@ -591,6 +755,45 @@ def test_setup_dialog_collects_reference_and_candidate_group(tmp_path) -> None:
     application.processEvents()
 
 
+def test_setup_dialog_filters_non_fingerprint_records_before_reference_phase(
+    tmp_path,
+) -> None:
+    application = QApplication.instance() or QApplication([])
+    first_fingerprint = tmp_path / "first.nist"
+    face_record = tmp_path / "face.nist"
+    second_fingerprint = tmp_path / "second.nist"
+    first_fingerprint.write_bytes(
+        _tagged_record(14, [("002", b"1"), ("013", b"1"), ("999", b"fingerprint")])
+    )
+    face_record.write_bytes(
+        _tagged_record(
+            10,
+            [("002", b"2"), ("003", b"FACE"), ("999", b"SECRET-FACE-PAYLOAD")],
+        )
+    )
+    second_fingerprint.write_bytes(
+        _tagged_record(14, [("002", b"3"), ("013", b"7"), ("999", b"fingerprint")])
+    )
+    dialog = ComparisonSetupDialog(tmp_path)
+
+    dialog.set_source_selection([first_fingerprint, face_record, second_fingerprint])
+
+    assert dialog._record_paths == [first_fingerprint, second_fingerprint]
+    assert dialog.reference_list.count() == 2
+    assert face_record.name not in "\n".join(
+        dialog.reference_list.item(index).toolTip()
+        for index in range(dialog.reference_list.count())
+    )
+    assert "Non-fingerprint records skipped: 1" in dialog.source_status.text()
+
+    dialog._go_next()
+
+    assert dialog.phase_stack.currentWidget() is not dialog.phase_stack.widget(0)
+    assert dialog.reference_status.text() == "Non-fingerprint records skipped: 1"
+    dialog.close()
+    application.processEvents()
+
+
 def test_setup_dialog_appoints_reference_from_one_unified_record_group(tmp_path) -> None:
     application = QApplication.instance() or QApplication([])
     paths = [tmp_path / name for name in ("one.nist", "two.an2", "three.eft")]
@@ -612,8 +815,17 @@ def test_setup_dialog_appoints_reference_from_one_unified_record_group(tmp_path)
 def test_setup_dialog_adds_individual_record_selections_incrementally(tmp_path) -> None:
     application = QApplication.instance() or QApplication([])
     paths = [tmp_path / name for name in ("one.nist", "two.nist", "three.nist")]
-    for path in paths:
-        path.write_bytes(path.name.encode())
+    for index, path in enumerate(paths, start=1):
+        path.write_bytes(
+            _tagged_record(
+                14,
+                [
+                    ("002", str(index).encode()),
+                    ("013", str(index).encode()),
+                    ("999", b"fingerprint"),
+                ],
+            )
+        )
     dialog = ComparisonSetupDialog(tmp_path)
 
     dialog.set_source_selection(paths[:2])
@@ -629,8 +841,18 @@ def test_setup_dialog_accepts_dragged_record_group_and_zip(tmp_path, monkeypatch
     application = QApplication.instance() or QApplication([])
     records = [tmp_path / "one.nist", tmp_path / "two.dat"]
     archive = tmp_path / "records.zip"
-    for path in [*records, archive]:
-        path.write_bytes(path.name.encode())
+    for index, path in enumerate(records, start=1):
+        path.write_bytes(
+            _tagged_record(
+                14,
+                [
+                    ("002", str(index).encode()),
+                    ("013", str(index).encode()),
+                    ("999", b"fingerprint"),
+                ],
+            )
+        )
+    archive.write_bytes(archive.name.encode())
     dialog = ComparisonSetupDialog(tmp_path)
     callbacks: list[object] = []
     monkeypatch.setattr(

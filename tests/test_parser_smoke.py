@@ -212,6 +212,26 @@ def test_unsupported_record_is_visible_retained_and_makes_transaction_partial() 
     assert "RAW-BIOMETRIC-DATA" not in repr(summary)
 
 
+def test_parser_attaches_modality_classification_from_records_and_fields() -> None:
+    type_13_palm = _tagged_record(
+        13,
+        [("002", b"1"), ("013", b"21"), ("999", b"latent-palm-image")],
+    )
+    type_14_finger = _tagged_record(
+        14,
+        [("002", b"2"), ("013", b"7"), ("999", b"fingerprint-image")],
+    )
+    type_17_iris = _tagged_record(17, [("002", b"3"), ("999", b"iris-image")])
+
+    transaction = NistParser().parse_bytes(type_13_palm + type_14_finger + type_17_iris)
+
+    assert transaction.records[0].biometric_classification.modality == "palm"
+    assert transaction.records[1].biometric_classification.modality == "fingerprint"
+    assert transaction.records[2].biometric_classification.modality == "iris"
+    assert transaction.biometric_images[0].biometric_classification.modality == "palm"
+    assert transaction.biometric_images[1].biometric_classification.modality == "fingerprint"
+
+
 def test_unsupported_only_transaction_reports_unsupported_status() -> None:
     transaction = NistParser().parse_bytes(
         _tagged_record(17, [("002", b"4"), ("003", b"unsupported")])

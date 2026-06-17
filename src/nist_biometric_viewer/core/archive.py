@@ -46,6 +46,7 @@ class ComparisonArchiveError(LoadingError):
 @dataclass(slots=True)
 class ArchiveContents:
     nist_paths: list[Path]
+    skipped_non_fingerprint_count: int = 0
 
 
 @dataclass(slots=True)

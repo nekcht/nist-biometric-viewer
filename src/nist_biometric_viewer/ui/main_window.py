@@ -37,6 +37,10 @@ from nist_biometric_viewer.core.archive import (
     ArchiveContents,
     build_archive_comparison_selection,
 )
+from nist_biometric_viewer.core.biometrics import (
+    NON_FINGERPRINT_RECORDS_SKIPPED,
+    SKIPPED_FROM_FINGERPRINT_REVIEW,
+)
 from nist_biometric_viewer.core.loading import (
     LoadingError,
     loading_error_from_exception,
@@ -88,6 +92,7 @@ class MainWindow(QMainWindow):
         self._worker: ArchiveWorker | ParseWorker | None = None
         self._processing_target: str | None = None
         self._pending_loading_error: LoadingError | None = None
+        self._pending_loading_notice: tuple[str, str] | None = None
         self._file_a: NistTransaction | None = None
         self._file_b: NistTransaction | None = None
         self._review_queue = ReviewQueue()
@@ -106,6 +111,7 @@ class MainWindow(QMainWindow):
         self._xlsx_exporter = DecisionXlsxExporter()
         self._pending_candidate_paths: list[Path] = []
         self._candidate_transactions: dict[Path, NistTransaction] = {}
+        self._skipped_candidate_paths: list[Path] = []
         self._archive_temp_directory: TemporaryDirectory | None = None
         self._archive_contents_after_thread: ArchiveContents | None = None
         self._first_pair_ready = False
@@ -560,6 +566,8 @@ class MainWindow(QMainWindow):
         self._review_queue = ReviewQueue()
         self._pending_candidate_paths = list(dict.fromkeys(candidate_paths))
         self._candidate_transactions.clear()
+        self._skipped_candidate_paths.clear()
+        self._pending_loading_notice = None
         self._first_pair_ready = False
         self._candidate_ready = False
         self._start_candidate_after_thread = False
@@ -655,6 +663,13 @@ class MainWindow(QMainWindow):
     def _processing_finished(self, transaction: NistTransaction) -> None:
         target = self._processing_target or "a"
         if target == "a":
+            if not transaction.biometric_images:
+                self._pending_loading_notice = (
+                    "No fingerprint impressions found",
+                    "No fingerprint impressions found.",
+                )
+                self.statusBar().showMessage("No fingerprint impressions found.")
+                return
             self._file_a = transaction
             self._file_b = None
             widgets = self.file_a_widgets
@@ -667,10 +682,44 @@ class MainWindow(QMainWindow):
             self._update_file_sidebar(widgets, transaction)
             self._start_candidate_after_thread = True
             return
+        if not transaction.biometric_images:
+            self._skip_current_candidate(transaction)
+            return
         current_path = self._review_queue.current_path
         if current_path is not None:
             self._candidate_transactions[current_path] = transaction
         self._activate_candidate(transaction)
+
+    def _skip_current_candidate(self, transaction: NistTransaction) -> None:
+        skipped_path = self._review_queue.remove_current_candidate()
+        if skipped_path is not None:
+            self._skipped_candidate_paths.append(skipped_path)
+            self._candidate_transactions.pop(skipped_path, None)
+        self._file_b = None
+        self._clear_file_sidebar(self.file_b_widgets)
+        self._populate_pair_navigation()
+        self._update_review_status()
+        message = self._skipped_records_message()
+        LOGGER.info("Comparison Record skipped from fingerprint review")
+        if self._review_queue.current_path is not None:
+            self._start_candidate_after_thread = True
+            self.statusBar().showMessage(message)
+            return
+        self._start_candidate_after_thread = False
+        self._set_workspace_loading(False)
+        if not self._first_pair_ready:
+            self._pending_loading_notice = (
+                "No fingerprint impressions found",
+                "No fingerprint impressions found.",
+            )
+            self.statusBar().showMessage("No fingerprint impressions found.")
+            return
+        self._candidate_ready = True
+        self._set_decision_buttons_enabled(True)
+        self.page_stack.setCurrentWidget(self.workspace_page)
+        self.statusBar().showMessage(
+            f"All comparison pairs decided | {message} | Use End Session when review is complete"
+        )
 
     def _activate_candidate(self, transaction: NistTransaction) -> None:
         self._file_b = transaction
@@ -696,7 +745,10 @@ class MainWindow(QMainWindow):
             QTimer.singleShot(100, self._fit_comparison_after_workspace_resize)
         self.reset_zoom_action.setEnabled(True)
         self.metadata_action.setEnabled(True)
-        self.statusBar().showMessage(f"Comparison ready | Warnings: {total_warnings}")
+        skipped = self._skipped_records_status_fragment()
+        self.statusBar().showMessage(
+            f"Comparison ready{skipped} | Warnings: {total_warnings}"
+        )
 
     def _refresh_comparison(self):
         session = build_cross_file_comparison(
@@ -719,6 +771,18 @@ class MainWindow(QMainWindow):
         self.comparison_grid.set_metadata_visible(self.metadata_action.isChecked())
         return session
 
+    def _skipped_records_status_fragment(self) -> str:
+        if not self._skipped_candidate_paths:
+            return ""
+        count = len(self._skipped_candidate_paths)
+        return f" | {_sentence_label(NON_FINGERPRINT_RECORDS_SKIPPED)}: {count}"
+
+    def _skipped_records_message(self) -> str:
+        count = len(self._skipped_candidate_paths)
+        if count <= 1:
+            return SKIPPED_FROM_FINGERPRINT_REVIEW
+        return f"{_sentence_label(NON_FINGERPRINT_RECORDS_SKIPPED)}: {count}"
+
     @staticmethod
     def _update_file_sidebar(widgets: dict[str, QWidget], transaction: NistTransaction) -> None:
         file_label = widgets["file"]
@@ -732,11 +796,17 @@ class MainWindow(QMainWindow):
         file_label.setText(transaction.source_path.name)
         summary = transaction.compatibility_summary
         summary_label.setText(summary.compact_text(separator="\n"))
+        supported_label = (
+            "Fingerprint impressions"
+            if summary.review_workflow == "fingerprint_review"
+            else "Supported biometric images"
+        )
         rows = [
             ("Compatibility", summary.status),
             ("Version", transaction.version),
             ("Transaction type", transaction.transaction_type),
-            ("Supported biometric images", summary.supported_biometric_image_records),
+            (supported_label, summary.supported_biometric_image_records),
+            ("Skipped biometric records", summary.skipped_biometric_record_count),
             ("Unsupported records", summary.unsupported_records_text),
             ("Partial support", summary.partial_records_text),
             ("Warnings", summary.warning_count),
@@ -811,9 +881,25 @@ class MainWindow(QMainWindow):
         if pending_error is not None:
             self._recover_from_loading_error(pending_error)
             return
+        pending_notice = self._pending_loading_notice
+        self._pending_loading_notice = None
+        if pending_notice is not None:
+            title, message = pending_notice
+            self._reset_to_initial_screen()
+            self.statusBar().showMessage(f"{message} | Ready for a new comparison")
+            QMessageBox.information(self, title, message)
+            return
         archive_contents = self._archive_contents_after_thread
         self._archive_contents_after_thread = None
         if archive_contents is not None:
+            if len(archive_contents.nist_paths) < 2:
+                title, message = _fingerprint_source_requirement_notice(
+                    archive_contents.skipped_non_fingerprint_count
+                )
+                self._reset_to_initial_screen()
+                self.statusBar().showMessage(f"{message} | Ready for a new comparison")
+                QMessageBox.information(self, title, message)
+                return
             archive_selection = self._select_archive_reference(archive_contents)
             if archive_selection is None:
                 self._reset_to_initial_screen()
@@ -845,7 +931,11 @@ class MainWindow(QMainWindow):
         self,
         contents: ArchiveContents,
     ) -> ArchiveComparisonSelection | None:
-        dialog = ArchiveReferenceDialog(contents.nist_paths, self)
+        dialog = ArchiveReferenceDialog(
+            contents.nist_paths,
+            self,
+            skipped_non_fingerprint_count=contents.skipped_non_fingerprint_count,
+        )
         if not dialog.exec() or dialog.reference_path is None:
             return None
         return build_archive_comparison_selection(contents, dialog.reference_path)
@@ -914,8 +1004,10 @@ class MainWindow(QMainWindow):
             if not was_complete and self._settings.auto_end_session():
                 self._finish_current_session(automatic=True)
                 return
+            skipped = self._skipped_records_status_fragment()
             self.statusBar().showMessage(
-                "All comparison pairs decided | Use End Session when review is complete"
+                "All comparison pairs decided"
+                f"{skipped} | Use End Session when review is complete"
             )
             return
         if previous is not None:
@@ -1036,7 +1128,9 @@ class MainWindow(QMainWindow):
         self._review_queue = ReviewQueue()
         self._pending_candidate_paths.clear()
         self._candidate_transactions.clear()
+        self._skipped_candidate_paths.clear()
         self._archive_contents_after_thread = None
+        self._pending_loading_notice = None
         self._first_pair_ready = False
         self._candidate_ready = False
         self._start_candidate_after_thread = False
@@ -1444,3 +1538,17 @@ class MainWindow(QMainWindow):
             )
             return
         event.ignore()
+
+
+def _sentence_label(value: str) -> str:
+    return value.rstrip(".")
+
+
+def _fingerprint_source_requirement_notice(skipped_count: int) -> tuple[str, str]:
+    if skipped_count:
+        return (
+            "Records required",
+            "At least two fingerprint records are required. "
+            f"Non-fingerprint records skipped: {skipped_count}",
+        )
+    return ("No fingerprint impressions found", "No fingerprint impressions found.")

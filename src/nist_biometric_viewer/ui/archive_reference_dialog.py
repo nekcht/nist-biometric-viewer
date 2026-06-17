@@ -93,7 +93,12 @@ class ReferenceRecordList(QListWidget):
 
 
 class ArchiveReferenceDialog(QDialog):
-    def __init__(self, paths: list[Path], parent=None) -> None:
+    def __init__(
+        self,
+        paths: list[Path],
+        parent=None,
+        skipped_non_fingerprint_count: int = 0,
+    ) -> None:
         super().__init__(parent)
         self.setWindowTitle("Select Reference Record")
         self.resize(680, 480)
@@ -104,6 +109,14 @@ class ArchiveReferenceDialog(QDialog):
         guidance.setObjectName("referenceGuidance")
         guidance.setWordWrap(True)
         layout.addWidget(guidance)
+        self.status_label = QLabel("")
+        self.status_label.setObjectName("archiveReferenceStatus")
+        self.status_label.setWordWrap(True)
+        if skipped_non_fingerprint_count:
+            self.status_label.setText(
+                f"Non-fingerprint records skipped: {skipped_non_fingerprint_count}"
+            )
+        layout.addWidget(self.status_label)
 
         self.record_list = ReferenceRecordList(paths)
         self.record_list.referenceAppointmentChanged.connect(self._update_next_button)

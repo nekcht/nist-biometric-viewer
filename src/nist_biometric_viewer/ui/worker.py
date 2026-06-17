@@ -8,6 +8,11 @@ from pathlib import Path
 from PySide6.QtCore import QObject, QThread, Signal, Slot
 
 from nist_biometric_viewer.core.archive import prepare_comparison_archive
+from nist_biometric_viewer.core.biometrics import (
+    FINGERPRINT_REVIEW,
+    apply_biometric_workflow_filter,
+)
+from nist_biometric_viewer.core.fingerprint_filter import filter_fingerprint_source_paths
 from nist_biometric_viewer.core.loading import (
     LoadingCancelled,
     loading_error_from_exception,
@@ -39,6 +44,10 @@ class ArchiveWorker(QObject):
                 self.destination,
                 should_cancel=_interruption_requested,
             )
+            self.progress.emit("Filtering fingerprint records...")
+            filtered = filter_fingerprint_source_paths(contents.nist_paths)
+            contents.nist_paths = filtered.fingerprint_paths
+            contents.skipped_non_fingerprint_count = filtered.skipped_count
             self.finished.emit(contents)
         except LoadingCancelled:
             self.cancelled.emit()
@@ -82,6 +91,7 @@ class ParseWorker(QObject):
                     stage="nist_parsing",
                     source=self.path,
                 ) from exc
+            apply_biometric_workflow_filter(transaction, FINGERPRINT_REVIEW)
             _raise_if_interrupted()
             decoder = ImageDecoder()
             total = len(transaction.biometric_images)
