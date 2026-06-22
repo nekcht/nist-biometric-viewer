@@ -88,6 +88,25 @@ def test_review_queue_replaces_one_decision_per_candidate(tmp_path: Path) -> Non
     assert queue.is_complete
 
 
+def test_review_queue_decisions_follow_candidate_paths_after_skip(
+    tmp_path: Path,
+) -> None:
+    file_a = _transaction(tmp_path / "a.nist", "A-001")
+    file_b1 = _transaction(tmp_path / "b1.nist", "B-001")
+    skipped_path = tmp_path / "photo.nist"
+    file_b2 = _transaction(tmp_path / "b2.nist", "B-002")
+    queue = ReviewQueue()
+    queue.start(file_a, [file_b1.source_path, skipped_path, file_b2.source_path])
+    queue.set_current_index(2)
+
+    decision, _ = queue.set_decision("MATCH", file_b2)
+    queue.remove_candidate_path(skipped_path)
+
+    assert queue.candidate_paths == [file_b1.source_path, file_b2.source_path]
+    assert queue.decision_for_index(1) is decision
+    assert queue.next_undecided_index(1) == 0
+
+
 def test_review_queue_keeps_file_a_when_manually_selected_as_candidate(tmp_path: Path) -> None:
     file_a = _transaction(tmp_path / "a.nist", "A-001")
     queue = ReviewQueue()

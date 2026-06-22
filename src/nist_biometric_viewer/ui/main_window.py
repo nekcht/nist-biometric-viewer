@@ -91,6 +91,7 @@ class MainWindow(QMainWindow):
         self._thread: QThread | None = None
         self._worker: ArchiveWorker | ParseWorker | None = None
         self._processing_target: str | None = None
+        self._processing_path: Path | None = None
         self._pending_loading_error: LoadingError | None = None
         self._pending_loading_notice: tuple[str, str] | None = None
         self._file_a: NistTransaction | None = None
@@ -111,6 +112,7 @@ class MainWindow(QMainWindow):
         self._xlsx_exporter = DecisionXlsxExporter()
         self._pending_candidate_paths: list[Path] = []
         self._candidate_transactions: dict[Path, NistTransaction] = {}
+        self._active_candidate_path: Path | None = None
         self._skipped_candidate_paths: list[Path] = []
         self._archive_temp_directory: TemporaryDirectory | None = None
         self._archive_contents_after_thread: ArchiveContents | None = None
@@ -566,6 +568,7 @@ class MainWindow(QMainWindow):
         self._review_queue = ReviewQueue()
         self._pending_candidate_paths = list(dict.fromkeys(candidate_paths))
         self._candidate_transactions.clear()
+        self._active_candidate_path = None
         self._skipped_candidate_paths.clear()
         self._pending_loading_notice = None
         self._first_pair_ready = False
@@ -585,6 +588,7 @@ class MainWindow(QMainWindow):
         if self._worker_is_running():
             return
         self._processing_target = "archive"
+        self._processing_path = archive_path
         self.new_comparison_action.setEnabled(False)
         self._set_decision_buttons_enabled(False)
 
@@ -606,6 +610,7 @@ class MainWindow(QMainWindow):
         if self._worker_is_running():
             return
         self._processing_target = target
+        self._processing_path = path
         self._candidate_ready = False
         self.new_comparison_action.setEnabled(False)
         self._set_decision_buttons_enabled(False)
@@ -661,7 +666,7 @@ class MainWindow(QMainWindow):
             )
 
     def _processing_finished(self, transaction: NistTransaction) -> None:
-        target = self._processing_target or "a"
+        target = self._processing_role_for(transaction)
         if target == "a":
             if not transaction.biometric_images:
                 self._pending_loading_notice = (
@@ -682,19 +687,45 @@ class MainWindow(QMainWindow):
             self._update_file_sidebar(widgets, transaction)
             self._start_candidate_after_thread = True
             return
+        candidate_path = self._loaded_candidate_path(transaction)
+        if candidate_path is None:
+            raise ValueError("Loaded Comparison Record is outside the review queue.")
+        if transaction.source_path != candidate_path:
+            raise ValueError("Loaded Comparison Record does not match the selected pair.")
         if not transaction.biometric_images:
-            self._skip_current_candidate(transaction)
+            self._skip_candidate(transaction, candidate_path)
             return
-        current_path = self._review_queue.current_path
-        if current_path is not None:
-            self._candidate_transactions[current_path] = transaction
-        self._activate_candidate(transaction)
+        self._candidate_transactions[candidate_path] = transaction
+        if self._review_queue.current_path != candidate_path:
+            current_path = self._review_queue.current_path
+            self._start_candidate_after_thread = (
+                current_path is not None
+                and (
+                    not self._candidate_ready
+                    or self._active_candidate_path != current_path
+                )
+            )
+            return
+        self._activate_candidate(transaction, candidate_path)
 
     def _skip_current_candidate(self, transaction: NistTransaction) -> None:
-        skipped_path = self._review_queue.remove_current_candidate()
+        self._skip_candidate(transaction, self._review_queue.current_path)
+
+    def _skip_candidate(
+        self,
+        transaction: NistTransaction,
+        candidate_path: Path | None,
+    ) -> None:
+        skipped_path = (
+            self._review_queue.remove_candidate_path(candidate_path)
+            if candidate_path is not None
+            else None
+        )
         if skipped_path is not None:
             self._skipped_candidate_paths.append(skipped_path)
             self._candidate_transactions.pop(skipped_path, None)
+            if self._active_candidate_path == skipped_path:
+                self._active_candidate_path = None
         self._file_b = None
         self._clear_file_sidebar(self.file_b_widgets)
         self._populate_pair_navigation()
@@ -721,8 +752,25 @@ class MainWindow(QMainWindow):
             f"All comparison pairs decided | {message} | Use End Session when review is complete"
         )
 
-    def _activate_candidate(self, transaction: NistTransaction) -> None:
+    def _activate_candidate(
+        self,
+        transaction: NistTransaction,
+        candidate_path: Path | None = None,
+    ) -> None:
+        candidate_path = candidate_path or self._loaded_candidate_path(transaction)
+        if (
+            candidate_path is None
+            or self._review_queue.current_path != candidate_path
+            or transaction.source_path != candidate_path
+        ):
+            if candidate_path is not None and self._review_queue.has_candidate_path(
+                candidate_path
+            ):
+                self._candidate_transactions[candidate_path] = transaction
+            return
+        self._ensure_reference_consistency()
         self._file_b = transaction
+        self._active_candidate_path = candidate_path
         self._update_file_sidebar(self.file_b_widgets, transaction)
         session = self._refresh_comparison()
         total_warnings = sum(
@@ -751,6 +799,7 @@ class MainWindow(QMainWindow):
         )
 
     def _refresh_comparison(self):
+        self._ensure_reference_consistency()
         session = build_cross_file_comparison(
             self._file_a.biometric_images if self._file_a else [],
             self._file_b.biometric_images if self._file_b else [],
@@ -770,6 +819,32 @@ class MainWindow(QMainWindow):
         self.comparison_grid.set_session(session)
         self.comparison_grid.set_metadata_visible(self.metadata_action.isChecked())
         return session
+
+    def _ensure_reference_consistency(self) -> None:
+        if self._review_queue.file_a is None or self._file_a is self._review_queue.file_a:
+            return
+        self._file_a = self._review_queue.file_a
+        self._update_file_sidebar(self.file_a_widgets, self._file_a)
+
+    def _processing_role_for(self, transaction: NistTransaction) -> str:
+        if self._processing_target in {"a", "b"}:
+            return self._processing_target
+        loaded_path = self._processing_path or transaction.source_path
+        if self._review_queue.has_candidate_path(loaded_path):
+            return "b"
+        if self._review_queue.has_candidate_path(transaction.source_path):
+            return "b"
+        return "a"
+
+    def _loaded_candidate_path(self, transaction: NistTransaction) -> Path | None:
+        for path in (
+            self._processing_path,
+            transaction.source_path,
+            self._review_queue.current_path,
+        ):
+            if path is not None and self._review_queue.has_candidate_path(path):
+                return path
+        return None
 
     def _skipped_records_status_fragment(self) -> str:
         if not self._skipped_candidate_paths:
@@ -876,6 +951,7 @@ class MainWindow(QMainWindow):
         self._thread = None
         self._worker = None
         self._processing_target = None
+        self._processing_path = None
         pending_error = self._pending_loading_error
         self._pending_loading_error = None
         if pending_error is not None:
@@ -947,12 +1023,13 @@ class MainWindow(QMainWindow):
         self._candidate_ready = False
         self._set_decision_buttons_enabled(False)
         self._file_b = None
+        self._active_candidate_path = None
         self._clear_file_sidebar(self.file_b_widgets)
         self._update_review_status()
         self._update_pair_navigation()
         cached = self._candidate_transactions.get(path)
         if cached is not None:
-            self._activate_candidate(cached)
+            self._activate_candidate(cached, path)
             return
         self._show_loading(
             f"Loading Comparison Record {self._review_queue.candidate_number} of "
@@ -962,8 +1039,21 @@ class MainWindow(QMainWindow):
         self._start_processing(path, "b")
 
     def _record_decision(self, decision: ReviewDecisionValue) -> None:
-        if self._file_b is None:
+        current_path = self._review_queue.current_path
+        if self._file_b is None or current_path is None:
             return
+        self._ensure_reference_consistency()
+        if self._file_b.source_path != current_path:
+            cached = self._candidate_transactions.get(current_path)
+            if cached is not None:
+                self._activate_candidate(cached, current_path)
+            self._update_decision_highlight()
+            self.statusBar().showMessage("Comparison pair is still loading")
+            return
+        if self._active_candidate_path is None:
+            self._active_candidate_path = current_path
+        elif self._active_candidate_path != current_path:
+            self._active_candidate_path = current_path
         if self._history_store is None:
             QMessageBox.critical(
                 self,
@@ -1126,8 +1216,11 @@ class MainWindow(QMainWindow):
         self._file_a = None
         self._file_b = None
         self._review_queue = ReviewQueue()
+        self._processing_target = None
+        self._processing_path = None
         self._pending_candidate_paths.clear()
         self._candidate_transactions.clear()
+        self._active_candidate_path = None
         self._skipped_candidate_paths.clear()
         self._archive_contents_after_thread = None
         self._pending_loading_notice = None

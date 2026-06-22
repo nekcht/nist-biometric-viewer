@@ -11,6 +11,8 @@ env/
 .env.*
 !.env.example
 
+.agents/
+
 # Test, lint, type-check, and coverage artifacts
 .pytest_cache/
 .pytest-*/

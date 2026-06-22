@@ -1221,6 +1221,76 @@ def test_next_comparison_navigates_to_next_undecided_pair_with_wraparound(
     application.processEvents()
 
 
+def test_archive_style_navigation_keeps_selected_reference_consistent(tmp_path) -> None:
+    application = QApplication.instance() or QApplication([])
+    records = [
+        NistTransaction(source_path=tmp_path / f"{index}.nist", biometric_images=[_image("1")])
+        for index in range(1, 5)
+    ]
+    reference, file_2, file_3, file_4 = records
+    window = _window(tmp_path)
+    window._file_a = reference
+    window._review_queue.start(
+        reference,
+        [file_2.source_path, file_3.source_path, file_4.source_path],
+    )
+    window._candidate_transactions = {
+        file_3.source_path: file_3,
+        file_4.source_path: file_4,
+    }
+    window._populate_pair_navigation()
+    window._activate_candidate(file_2, file_2.source_path)
+
+    window._record_decision("MATCH")
+
+    assert window._file_a is reference
+    assert window.comparison_grid.session.file_a is reference
+    assert window._file_b is file_3
+    assert window.comparison_grid.session.file_b is file_3
+
+    window.next_button.click()
+
+    assert window._file_a is reference
+    assert window.comparison_grid.session.file_a is reference
+    assert window._file_b is file_4
+    assert window.comparison_grid.session.file_b is file_4
+
+    window.pair_navigation_list.setCurrentRow(1)
+
+    assert window._file_a is reference
+    assert window.comparison_grid.session.file_a is reference
+    assert window._file_b is file_3
+    assert window.comparison_grid.session.file_b is file_3
+    window.close()
+    application.processEvents()
+
+
+def test_lost_processing_target_does_not_promote_candidate_to_reference(tmp_path) -> None:
+    application = QApplication.instance() or QApplication([])
+    reference = NistTransaction(
+        source_path=tmp_path / "1-reference.nist",
+        biometric_images=[_image("1")],
+    )
+    file_2 = NistTransaction(source_path=tmp_path / "2.nist", biometric_images=[_image("1")])
+    file_3 = NistTransaction(source_path=tmp_path / "3.nist", biometric_images=[_image("1")])
+    window = _window(tmp_path)
+    window._file_a = reference
+    window._review_queue.start(reference, [file_2.source_path, file_3.source_path])
+    window._review_queue.set_current_index(1)
+    window._processing_target = None
+    window._processing_path = file_3.source_path
+
+    window._processing_finished(file_3)
+
+    assert window._file_a is reference
+    assert window._review_queue.file_a is reference
+    assert window._file_b is file_3
+    assert window.comparison_grid.session.file_a is reference
+    assert window.comparison_grid.session.file_b is file_3
+    window.close()
+    application.processEvents()
+
+
 def test_pair_navigation_shows_and_allows_changing_decisions(tmp_path) -> None:
     application = QApplication.instance() or QApplication([])
     file_a = NistTransaction(source_path=tmp_path / "a.nist")
@@ -1780,19 +1850,6 @@ def test_history_dialog_can_delete_all_history_and_detach_active_decisions(
     dialog.close()
     window.close()
     application.processEvents()
-
-
-def test_about_text_contains_developer_details() -> None:
-    assert "Nektarios Christou" in ABOUT_TEXT
-    assert "Hellenic Police" in ABOUT_TEXT
-    assert "n.christou@police.gr" in ABOUT_TEXT
-    assert "https://github.com/nekcht" in ABOUT_TEXT
-    assert "Office of European Interoperability Applications" not in ABOUT_TEXT
-    assert "Hellenic Police Headquarters" not in ABOUT_TEXT
-    assert "10/06/2026" not in ABOUT_TEXT
-    assert "Supports common ANSI/NIST biometric image records" in ABOUT_TEXT
-    assert "Versions and agency profiles vary" in ABOUT_TEXT
-    assert __version__ in ABOUT_TEXT
 
 
 def test_about_dialog_uses_clickable_contact_details() -> None:

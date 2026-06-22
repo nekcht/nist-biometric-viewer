@@ -109,31 +109,65 @@ class ReviewQueue:
     def remove_current_candidate(self) -> Path | None:
         if self.current_path is None:
             return None
-        skipped_path = self.candidate_paths.pop(self.current_index)
+        return self.remove_candidate_path(self.current_path)
+
+    def remove_candidate_path(self, path: Path) -> Path | None:
+        try:
+            candidate_index = self.candidate_paths.index(path)
+        except ValueError:
+            return None
+        skipped_path = self.candidate_paths.pop(candidate_index)
+        self.decisions = [
+            decision
+            for decision in self.decisions
+            if decision.file_b.source_path != skipped_path
+        ]
         if not self.candidate_paths:
             self.current_index = -1
-        elif self.current_index >= len(self.candidate_paths):
+        elif candidate_index < self.current_index:
+            self.current_index -= 1
+        elif candidate_index == self.current_index and self.current_index >= len(
+            self.candidate_paths
+        ):
             self.current_index = len(self.candidate_paths) - 1
         return skipped_path
 
+    def index_for_path(self, path: Path) -> int | None:
+        try:
+            return self.candidate_paths.index(path)
+        except ValueError:
+            return None
+
+    def has_candidate_path(self, path: Path) -> bool:
+        return self.index_for_path(path) is not None
+
     def decision_for_index(self, index: int) -> ReviewDecision | None:
-        candidate_number = index + 1
+        if not 0 <= index < len(self.candidate_paths):
+            return None
+        candidate_path = self.candidate_paths[index]
         return next(
             (
                 decision
                 for decision in self.decisions
-                if decision.candidate_number == candidate_number
+                if decision.file_b.source_path == candidate_path
             ),
             None,
         )
 
     def next_undecided_index(self, after_index: int) -> int | None:
-        decided = {decision.candidate_number - 1 for decision in self.decisions}
+        decided = {decision.file_b.source_path for decision in self.decisions}
         ordered_indexes = [
             *range(after_index + 1, len(self.candidate_paths)),
             *range(0, after_index),
         ]
-        return next((index for index in ordered_indexes if index not in decided), None)
+        return next(
+            (
+                index
+                for index in ordered_indexes
+                if self.candidate_paths[index] not in decided
+            ),
+            None,
+        )
 
     def set_decision(
         self,

@@ -14,9 +14,9 @@ ABOUT_TEXT = (
     "<p>Visual review only. Supports common ANSI/NIST biometric image records. "
     "Versions and agency profiles vary; unsupported records may appear as warnings.</p>"
     f"<p><b>Version</b><br>{__version__}</p>"
-    "<p><b>Developed by</b><br>Nektarios Christou<br>Hellenic Police</p>"
+    "<p><b>Developed by</b><br>Nektarios Christou</p>"
     "<p><b>Contact</b><br>"
-    '<a href="mailto:n.christou@police.gr">n.christou@police.gr</a><br>'
+    '<a href="mailto:nekcht@gmail.com">nekcht@gmail.com</a><br>'
     '<a href="https://github.com/nekcht">github.com/nekcht</a></p>'
 )
 
