@@ -1,5 +1,7 @@
 # Nist Biometric Viewer
 
+![Nist Biometric Viewer app screenshot](assets/app.webp)
+
 A local Windows desktop tool for visually reviewing biometric images inside ANSI/NIST
 transaction files. It compares one **Reference Record** against one or more
 **Comparison Records**.
